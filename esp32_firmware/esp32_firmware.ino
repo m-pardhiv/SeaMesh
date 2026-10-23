@@ -25,6 +25,11 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include <esp_task_wdt.h>
+
+// If loop() stops running for this long, the chip restarts itself (the phone
+// reconnects on its own), instead of the node silently freezing
+#define LOOP_WDT_MS 8000
 
 // Radio - minimum power, because there is no antenna
 #define FREQ      433E6
@@ -225,6 +230,22 @@ bool startRadio() {
   return true;
 }
 
+// A missing or loose Ra-02 must not stop the node: Bluetooth and phone uploads
+// keep working, and the radio is retried every RADIO_RETRY_MS.
+#define RADIO_RETRY_MS 10000
+bool radioOk = false;
+unsigned long lastRadioTry = 0;
+
+void tryRadio() {
+  lastRadioTry = millis();
+  byte v = readChipVersion();
+  radioOk = v == 0x12 && startRadio();
+  if (radioOk) Serial.println("RADIO Ra-02 found (chip version 0x12)");
+  else Serial.println("RADIO Ra-02 not found (chip version 0x" + String(v, HEX) +
+                      ") - check its wires; running without LoRa, retrying every " +
+                      String(RADIO_RETRY_MS / 1000) + " s");
+}
+
 // LoRa.endPacket() in blocking mode waits forever for TX done, which froze the
 // whole node when the radio never reported it. Send asynchronously and give up
 // after TX_TIMEOUT_MS, logging the radio state and restarting the radio.
@@ -236,6 +257,10 @@ bool startRadio() {
 void transmit(Packet p) {
   p.via = boatId;
   String s = encode(p);
+  if (!radioOk) {
+    Serial.println("NORADIO not sent (no Ra-02): " + s);
+    return;
+  }
   LoRa.beginPacket();
   LoRa.print(s);
   LoRa.endPacket(true);
@@ -246,7 +271,10 @@ void transmit(Packet p) {
       Serial.println("TXERR no TX-done after " + String(TX_TIMEOUT_MS) + " ms: opmode=0x" +
                      String(readRadioReg(REG_OP_MODE), HEX) + " irq=0x" + String(readRadioReg(REG_IRQ_FLAGS), HEX) +
                      " version=0x" + String(readRadioReg(0x42), HEX) + " - restarting radio");
-      if (!startRadio()) Serial.println("TXERR radio restart failed");
+      if (readRadioReg(0x42) != 0x12 || !startRadio()) {
+        radioOk = false;   // radio gone - loop() retries it
+        Serial.println("TXERR radio lost - will retry");
+      }
       return;
     }
     delay(1);
@@ -490,6 +518,7 @@ void onPacket(Packet p, int rssi) {
 // output instead of PA_BOOST (not wired to the antenna pad on the Ra-02, but it
 // shows whether the problem is the power amplifier).
 void txTest(bool rfo) {
+  if (!radioOk) { Serial.println("TEST  no Ra-02"); return; }
   if (rfo) LoRa.setTxPower(0, PA_OUTPUT_RFO_PIN);
   Serial.println("TEST  sending with " + String(rfo ? "RFO" : "PA_BOOST") +
                  ", opmode before: 0x" + String(readRadioReg(REG_OP_MODE), HEX));
@@ -521,7 +550,24 @@ void printStatus() {
                              : "no phone fix - simulated " + String(simLat, 6) + ", " + String(simLon, 6);
   Serial.println("STAT  boat " + boatId + " | phone " + String(bleConnected ? "connected" : "not connected") +
                  " | " + String(online() ? "ONLINE (gateway)" : "OFFLINE (relay)") +
-                 " | SOS " + String(sosActive ? "active" : "off") + " | GPS " + gps);
+                 " | SOS " + String(sosActive ? "active" : "off") + " | radio " +
+                 String(radioOk ? "OK" : "MISSING") + " | GPS " + gps +
+                 " | uptime " + String(millis() / 1000) + " s | free heap " + String(ESP.getFreeHeap()) +
+                 " (min " + String(ESP.getMinFreeHeap()) + ")");
+}
+
+const char* resetReasonText() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "power on";
+    case ESP_RST_SW:       return "software restart";
+    case ESP_RST_PANIC:    return "CRASH (panic)";
+    case ESP_RST_INT_WDT:  return "CRASH (interrupt watchdog)";
+    case ESP_RST_TASK_WDT: return "FROZEN (task watchdog)";
+    case ESP_RST_WDT:      return "CRASH (watchdog)";
+    case ESP_RST_BROWNOUT: return "POWER DIP (brownout)";
+    case ESP_RST_EXT:      return "reset pin";
+    default:               return "other";
+  }
 }
 
 void checkInputs() {
@@ -549,6 +595,7 @@ void checkInputs() {
     else if (cmd == "online") { forceOffline = false; Serial.println("MODE  online allowed"); }
     else if (cmd == "status") printStatus();
     else if (cmd == "txtest" || cmd == "txtest rfo") txTest(cmd == "txtest rfo");
+    else if (cmd == "hangtest") { Serial.println("TEST  freezing loop - watchdog should restart in ~8 s"); while (true) {} }
   }
 }
 
@@ -573,29 +620,28 @@ void setup() {
   Serial.println("=== SeaMesh node " + boatId + " ===");
 
   SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, PIN_SS);
-  byte v = readChipVersion();
-  Serial.println("Chip version: 0x" + String(v, HEX));
-  if (v != 0x12) {
-    Serial.println("[FAIL] Ra-02 not found - check wiring");
-    while (1) { digitalWrite(LED_PIN, !digitalRead(LED_PIN)); delay(150); }
-  }
-  if (!startRadio()) {
-    Serial.println("[FAIL] LoRa.begin() failed");
-    while (1) { digitalWrite(LED_PIN, !digitalRead(LED_PIN)); delay(150); }
-  }
-  Serial.println("[OK] LoRa 433 MHz, TX power " + String(TX_POWER) + " dBm (no antenna mode)");
+  tryRadio();
+  if (radioOk) Serial.println("[OK] LoRa 433 MHz, TX power " + String(TX_POWER) + " dBm (no antenna mode)");
   Serial.println("[OK] Sensors optional: SOS button D27, water D33 (nothing wired = no alert)");
 
   setupBle();
   Serial.println("[OK] Bluetooth: open the SeaMesh app and pick 'SeaMesh-" + boatId + "'");
   Serial.println("Commands: sos, cancel, pos, offline, online, status");
+  Serial.println("Last restart: " + String(resetReasonText()));
   Serial.println("--------------------------");
+
+  esp_task_wdt_config_t wdt = { .timeout_ms = LOOP_WDT_MS, .idle_core_mask = 0, .trigger_panic = true };
+  esp_task_wdt_reconfigure(&wdt);
+  esp_task_wdt_add(NULL);   // watch this (loop) task
 }
 
 void loop() {
+  esp_task_wdt_reset();
   handleBleInbox();
 
-  int size = LoRa.parsePacket();
+  if (!radioOk && millis() - lastRadioTry > RADIO_RETRY_MS) tryRadio();
+
+  int size = radioOk ? LoRa.parsePacket() : 0;
   if (size) {
     String s;
     while (LoRa.available()) s += (char)LoRa.read();

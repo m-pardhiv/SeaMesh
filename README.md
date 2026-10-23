@@ -83,7 +83,7 @@ Service `6e5a0001-5ea3-4e5a-9c1d-2b7f0a4c8e10`
 
 ### Serial commands (115200 baud)
 
-`sos`, `cancel`, `pos`, `offline` (ignore the phone's internet and relay over LoRa instead), `online`, `status`
+`sos`, `cancel`, `pos`, `offline` (ignore the phone's internet and relay over LoRa instead), `online`, `status` (also shows radio state, uptime and free memory), `txtest` / `txtest rfo` (trace one LoRa transmission), `hangtest` (freeze the loop to check the watchdog restarts the board)
 
 ## Backend
 
