@@ -197,13 +197,62 @@ byte readChipVersion() {
   return v;
 }
 
+byte readRadioReg(byte addr) {
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(PIN_SS, LOW);
+  SPI.transfer(addr & 0x7F);
+  byte v = SPI.transfer(0x00);
+  digitalWrite(PIN_SS, HIGH);
+  SPI.endTransaction();
+  return v;
+}
+
+void writeRadioReg(byte addr, byte v) {
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(PIN_SS, LOW);
+  SPI.transfer(addr | 0x80);
+  SPI.transfer(v);
+  digitalWrite(PIN_SS, HIGH);
+  SPI.endTransaction();
+}
+
+bool startRadio() {
+  LoRa.setPins(PIN_SS, PIN_RST, PIN_DIO0);
+  if (!LoRa.begin(FREQ)) return false;
+  LoRa.setTxPower(TX_POWER);
+  LoRa.setSyncWord(SYNC_WORD);
+  LoRa.enableCrc();
+  return true;
+}
+
+// LoRa.endPacket() in blocking mode waits forever for TX done, which froze the
+// whole node when the radio never reported it. Send asynchronously and give up
+// after TX_TIMEOUT_MS, logging the radio state and restarting the radio.
+#define REG_OP_MODE    0x01
+#define REG_IRQ_FLAGS  0x12
+#define IRQ_TX_DONE    0x08
+#define TX_TIMEOUT_MS  2000
+
 void transmit(Packet p) {
   p.via = boatId;
   String s = encode(p);
   LoRa.beginPacket();
   LoRa.print(s);
-  LoRa.endPacket();
-  Serial.println("TX    " + s);
+  LoRa.endPacket(true);
+
+  unsigned long start = millis();
+  while ((readRadioReg(REG_IRQ_FLAGS) & IRQ_TX_DONE) == 0) {
+    if (millis() - start > TX_TIMEOUT_MS) {
+      Serial.println("TXERR no TX-done after " + String(TX_TIMEOUT_MS) + " ms: opmode=0x" +
+                     String(readRadioReg(REG_OP_MODE), HEX) + " irq=0x" + String(readRadioReg(REG_IRQ_FLAGS), HEX) +
+                     " version=0x" + String(readRadioReg(0x42), HEX) + " - restarting radio");
+      if (!startRadio()) Serial.println("TXERR radio restart failed");
+      return;
+    }
+    delay(1);
+  }
+  writeRadioReg(REG_IRQ_FLAGS, IRQ_TX_DONE);
+  Serial.println("TX    " + s + "  (" + String(millis() - start) + " ms)");
   blink();
 }
 
@@ -436,6 +485,35 @@ void onPacket(Packet p, int rssi) {
   enqueue(p);
 }
 
+// Diagnostic for failed transmissions: send one short test packet and print how
+// the radio's mode and IRQ flags change. "txtest rfo" uses the low-power RFO
+// output instead of PA_BOOST (not wired to the antenna pad on the Ra-02, but it
+// shows whether the problem is the power amplifier).
+void txTest(bool rfo) {
+  if (rfo) LoRa.setTxPower(0, PA_OUTPUT_RFO_PIN);
+  Serial.println("TEST  sending with " + String(rfo ? "RFO" : "PA_BOOST") +
+                 ", opmode before: 0x" + String(readRadioReg(REG_OP_MODE), HEX));
+  LoRa.beginPacket();
+  LoRa.print("TEST");
+  LoRa.endPacket(true);
+
+  String trace = "";
+  byte lastMode = 0xFF, lastIrq = 0xFF;
+  unsigned long start = millis();
+  while (millis() - start < 300) {
+    byte mode = readRadioReg(REG_OP_MODE), irq = readRadioReg(REG_IRQ_FLAGS);
+    if (mode != lastMode || irq != lastIrq) {
+      trace += String(millis() - start) + "ms mode=0x" + String(mode, HEX) + " irq=0x" + String(irq, HEX) + " | ";
+      lastMode = mode;
+      lastIrq = irq;
+    }
+    if (irq & IRQ_TX_DONE) break;
+  }
+  Serial.println("TEST  " + trace);
+  writeRadioReg(REG_IRQ_FLAGS, 0xFF);
+  if (rfo) LoRa.setTxPower(TX_POWER);   // back to PA_BOOST
+}
+
 // ---------- inputs ----------
 void printStatus() {
   String gps = fixReceivedAt ? String(fixLat, 6) + ", " + String(fixLon, 6) +
@@ -470,6 +548,7 @@ void checkInputs() {
     else if (cmd == "offline") { forceOffline = true; Serial.println("MODE  forced offline (no internet)"); }
     else if (cmd == "online") { forceOffline = false; Serial.println("MODE  online allowed"); }
     else if (cmd == "status") printStatus();
+    else if (cmd == "txtest" || cmd == "txtest rfo") txTest(cmd == "txtest rfo");
   }
 }
 
@@ -500,14 +579,10 @@ void setup() {
     Serial.println("[FAIL] Ra-02 not found - check wiring");
     while (1) { digitalWrite(LED_PIN, !digitalRead(LED_PIN)); delay(150); }
   }
-  LoRa.setPins(PIN_SS, PIN_RST, PIN_DIO0);
-  if (!LoRa.begin(FREQ)) {
+  if (!startRadio()) {
     Serial.println("[FAIL] LoRa.begin() failed");
     while (1) { digitalWrite(LED_PIN, !digitalRead(LED_PIN)); delay(150); }
   }
-  LoRa.setTxPower(TX_POWER);
-  LoRa.setSyncWord(SYNC_WORD);
-  LoRa.enableCrc();
   Serial.println("[OK] LoRa 433 MHz, TX power " + String(TX_POWER) + " dBm (no antenna mode)");
   Serial.println("[OK] Sensors optional: SOS button D27, water D33 (nothing wired = no alert)");
 

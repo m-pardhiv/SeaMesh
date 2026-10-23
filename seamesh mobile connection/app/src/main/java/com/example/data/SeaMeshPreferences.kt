@@ -32,7 +32,7 @@ class SeaMeshPreferences(context: Context) {
     }
 
     companion object {
-        const val DEFAULT_SERVER_URL = "https://seamesh-api.onrender.com"
+        const val DEFAULT_SERVER_URL = "https://seamesh.onrender.com"
         private const val KEY_ACTIVE = "key_active"
         private const val KEY_SERVER_URL = "key_server_url"
         private const val KEY_API_KEY = "key_api_key"
