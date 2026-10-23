@@ -99,7 +99,17 @@ int sosRepeats = 0;
 unsigned long lastSos = 0;
 
 unsigned long wetSince = 0;
-bool lastBtn = HIGH;
+// SOS button: an interrupt records when the pin goes LOW / HIGH, so a press is
+// caught even while loop() is busy (a LoRa send blocks it for ~0.33 s, longer than
+// some quick taps). loop() then decides what the press was.
+#define BTN_MIN_MS 25               // shorter than this is contact noise, not a press
+volatile bool btnPending = false;   // a press started and has not been handled yet
+volatile unsigned long btnDownAt = 0, btnUpAt = 0;
+void IRAM_ATTR onButtonEdge() {
+  unsigned long t = millis();
+  if (digitalRead(PIN_SOS_BTN) == LOW) { btnDownAt = t; btnPending = true; }
+  else btnUpAt = t;
+}
 
 // duplicate filter
 #define SEEN_SIZE 40
@@ -643,6 +653,50 @@ void rxTest(unsigned long ms) {
                  " | CRC errors " + String(crcErrors));
 }
 
+// Diagnostic for the SOS button: record every change on the pin for ms, then
+// group them into presses (a press ends after 100 ms of the pin staying HIGH) and
+// report how long each was held and how many times the contact bounced.
+void btnTest(unsigned long ms) {
+  Serial.println("TEST  watching D" + String(PIN_SOS_BTN) + " for " + String(ms / 1000) + " s - press the button now (idle level: " +
+                 String(digitalRead(PIN_SOS_BTN) ? "HIGH, ok" : "LOW - wire or short problem") + ")");
+  btnPending = false;
+  const int MAX_EDGES = 400;
+  static unsigned long at[MAX_EDGES];
+  static bool level[MAX_EDGES];
+  int n = 0;
+  bool last = digitalRead(PIN_SOS_BTN);
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    bool now = digitalRead(PIN_SOS_BTN);
+    if (now != last && n < MAX_EDGES) { at[n] = micros(); level[n] = now; n++; }
+    last = now;
+    esp_task_wdt_reset();
+    delayMicroseconds(100);
+  }
+  btnPending = false;   // presses made during the test are not SOS requests
+  int presses = 0, tooShort = 0, bouncy = 0, i = 0;
+  while (i < n) {
+    if (level[i] != LOW) { i++; continue; }
+    int first = i, edges = 1;
+    unsigned long lastHigh = at[i];
+    int j = i + 1;
+    for (; j < n; j++) {
+      if (level[j] == HIGH) lastHigh = at[j];
+      else if (at[j] - lastHigh > 100000UL) break;     // 100 ms stable HIGH: previous press is over
+      edges++;
+    }
+    unsigned long heldMs = (lastHigh - at[first]) / 1000;
+    presses++;
+    if (heldMs < 30) tooShort++;
+    if (edges > 2) bouncy++;
+    Serial.println("TEST  press #" + String(presses) + ": held " + String(heldMs) + " ms, " + String(edges) +
+                   " edges" + (edges > 2 ? " (bounced)" : "") + (heldMs < 30 ? " - shorter than the old 30 ms check" : ""));
+    i = j;
+  }
+  Serial.println("TEST  done: " + String(presses) + " presses seen, " + String(bouncy) + " bounced, " +
+                 String(tooShort) + " shorter than 30 ms");
+}
+
 // ---------- inputs ----------
 void printStatus() {
   String gps = fixReceivedAt ? String(fixLat, 6) + ", " + String(fixLon, 6) +
@@ -672,12 +726,25 @@ const char* resetReasonText() {
 }
 
 void checkInputs() {
-  bool btn = digitalRead(PIN_SOS_BTN);
-  if (btn == LOW && lastBtn == HIGH) {
-    delay(30);
-    if (digitalRead(PIN_SOS_BTN) == LOW) triggerSos("BTN");
+  if (btnPending) {
+    noInterrupts();
+    unsigned long down = btnDownAt, up = btnUpAt;
+    bool low = digitalRead(PIN_SOS_BTN) == LOW;
+    interrupts();
+    bool released = !low && up >= down;
+    unsigned long held = released ? up - down : millis() - down;
+    if (low && held < BTN_MIN_MS) {
+      // still pressed but too soon to tell - decide on a later pass
+    } else if (held >= BTN_MIN_MS) {
+      btnPending = false;
+      if (sosActive) Serial.println("BTN   press ignored: an SOS is already being sent (" + String(sosRepeats) + "/" + String(SOS_MAX_REPEATS) + ")");
+      else { Serial.println("BTN   press (" + String(held) + " ms) -> SOS"); triggerSos("BTN"); }
+    } else if (released) {
+      btnPending = false;
+      Serial.println("BTN   glitch ignored (" + String(held) + " ms)");
+    }
+    // pin HIGH but up < down: contact bounced back down, wait for the next edge
   }
-  lastBtn = btn;
 
   if (digitalRead(PIN_WATER) == LOW) {
     if (wetSince == 0) wetSince = millis();
@@ -697,6 +764,7 @@ void checkInputs() {
     else if (cmd == "status") printStatus();
     else if (cmd == "txtest" || cmd == "txtest rfo") txTest(cmd == "txtest rfo");
     else if (cmd == "rxtest") rxTest(10000);
+    else if (cmd == "btntest") btnTest(20000);
     else if (cmd.startsWith("power ")) {
       int level = cmd.substring(6).toInt();
       if (level < 2 || level > 17) {
@@ -725,6 +793,7 @@ void setup() {
   delay(1000);
   pinMode(LED_PIN, OUTPUT);
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_SOS_BTN), onButtonEdge, CHANGE);
   pinMode(PIN_WATER, INPUT_PULLUP);
   randomSeed(esp_random());
   // Random start, so message ids after a reboot don't repeat ones the phone app and
