@@ -83,6 +83,7 @@ bool forceOffline = false;     // serial "offline" command, for the demo
 unsigned long lastPos = 0;
 
 bool sosActive = false;
+uint16_t sosFirstMsgId = 0;    // msgId of the first packet of the current SOS
 String sosTrig = "";
 int sosRepeats = 0;
 unsigned long lastSos = 0;
@@ -299,7 +300,9 @@ void cancelSos(const String& why);
 // The phone uploaded origin:msgId - for an SOS, tell that boat over LoRa
 void onUploadAck(const String& origin, uint16_t msgId) {
   if (origin == boatId) {
-    if (sosActive) cancelSos("uploaded by our own phone - SOS delivered!");
+    // only an SOS packet's upload ends the SOS, not a late ACK for an older position
+    bool isSosPacket = (uint16_t)(msgId - sosFirstMsgId) <= SOS_MAX_REPEATS;
+    if (sosActive && isSosPacket) cancelSos("uploaded by our own phone - SOS delivered!");
     return;
   }
   for (int i = 0; i < PENDING_SIZE; i++) {
@@ -389,6 +392,7 @@ void triggerSos(const String& trig) {
   sosActive = true;
   sosTrig = trig;
   sosRepeats = 0;
+  sosFirstMsgId = nextMsgId;
   digitalWrite(LED_PIN, HIGH);
   Serial.println("!!!   SOS triggered by " + trig);
   sendSos();
@@ -476,6 +480,9 @@ void setup() {
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
   pinMode(PIN_WATER, INPUT_PULLUP);
   randomSeed(esp_random());
+  // Random start, so message ids after a reboot don't repeat ones the phone app and
+  // backend already saw (they drop repeats as duplicates)
+  nextMsgId = random(1, 60000);
 
   char id[5];
   uint64_t mac = ESP.getEfuseMac();   // bytes are stored LSB first

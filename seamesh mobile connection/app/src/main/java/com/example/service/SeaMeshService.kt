@@ -140,9 +140,9 @@ class SeaMeshService : Service() {
     private fun startForegroundNotification() {
         val notification = buildNotification("SeaMesh active")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // No dataSync type: Android 15 stops dataSync services after 6 hours
             val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             startForeground(NOTIFICATION_ID, notification, serviceType)
         } else {
             startForeground(NOTIFICATION_ID, notification)

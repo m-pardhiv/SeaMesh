@@ -42,6 +42,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private lateinit var prefs: SeaMeshPreferences
+    // Refreshed after the permission dialog and on every resume, so the banner disappears
+    // as soon as permissions are granted
+    private val hasPermsState = mutableStateOf(false)
     private var isScannerActive = false
     private var scanCallback: ScanCallback? = null
 
@@ -79,7 +82,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 val uiState by SeaMeshStateHolder.uiState.collectAsState()
-                var hasPerms by remember { mutableStateOf(hasRequiredPermissions()) }
+                val hasPerms by hasPermsState
                 var showDevicePicker by remember { mutableStateOf(false) }
 
                 // Auto-show device picker on first launch if no device is configured yet
@@ -262,6 +265,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateHardwareAndPermissionsState() {
+        hasPermsState.value = hasRequiredPermissions()
+
         val btManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val btEnabled = btManager?.adapter?.isEnabled == true
 
