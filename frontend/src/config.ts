@@ -6,9 +6,6 @@ export const KOCHI_HARBOUR = { name: 'Kochi harbour', lat: 9.94, lon: 76.26 };
 export const MAP_CENTER: [number, number] = [9.96, 76.1];
 export const MAP_ZOOM = 10;
 
-/** Rough area where boats still have a phone signal. */
-export const COVERAGE = { lat: 9.9312, lon: 76.2673, radiusKm: 20, label: 'Approx. cellular coverage' };
-
 /** A boat is stale ("last known") after this long without a packet. */
 export const STALE_AFTER_MS = 60_000;
 

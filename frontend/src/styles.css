@@ -421,7 +421,6 @@ a { color: var(--brand-ink); }
   white-space: nowrap;
   pointer-events: none;
 }
-.map-text--coverage span { color: var(--brand-ink); border: 1px dashed var(--brand); }
 .map-text--search span { color: var(--red-ink); border: 1px dashed var(--red); transform: translate(calc(-100% - 12px), -50%); }
 
 .harbour-icon { background: none; border: 0; }

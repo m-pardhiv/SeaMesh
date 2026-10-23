@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import L from 'leaflet';
 import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import type { Boat } from '../types';
-import { COVERAGE, KOCHI_HARBOUR, MAP_CENTER, MAP_ZOOM } from '../config';
+import { KOCHI_HARBOUR, MAP_CENTER, MAP_ZOOM } from '../config';
 import { boatLook, isStale, searchRadiusKm, type BoatLook } from '../lib/boat';
-import { kmToLatDeg, kmToLonDeg } from '../lib/geo';
+import { kmToLonDeg } from '../lib/geo';
 import { formatCoords, formatDuration, googleMapsUrl, harbourLabel, routeLabel, triggerLabel } from '../lib/format';
 
 export interface FocusRequest {
@@ -20,7 +20,6 @@ interface Props {
 
 const COLORS: Record<BoatLook, string> = { normal: '#2F6FB3', sos: '#C8352B', stale: '#6B7458' };
 const MESH_COLOR = '#B8920A';
-const COVERAGE_COLOR = '#4F7A1E';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
@@ -53,7 +52,6 @@ const harbourIcon = L.divIcon({
   iconAnchor: [6, 6],
   html: `<span class="harbour-dot"></span><span class="harbour-label">${esc(KOCHI_HARBOUR.name)}</span>`,
 });
-const coverageLabelIcon = textIcon(COVERAGE.label, 'map-text--coverage');
 
 function BoatPopup({ boat, now }: { boat: Boat; now: number }) {
   const stale = isStale(boat, now);
@@ -215,13 +213,6 @@ export function BoatMap({ boats, now, focus }: Props) {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         maxZoom={18}
       />
-      <Circle
-        center={[COVERAGE.lat, COVERAGE.lon]}
-        radius={COVERAGE.radiusKm * 1000}
-        pathOptions={{ color: COVERAGE_COLOR, weight: 2, dashArray: '10 8', fillOpacity: 0.04, fillColor: COVERAGE_COLOR }}
-        interactive={false}
-      />
-      <Marker position={[COVERAGE.lat + kmToLatDeg(COVERAGE.radiusKm), COVERAGE.lon]} icon={coverageLabelIcon} interactive={false} keyboard={false} />
       <Marker position={[KOCHI_HARBOUR.lat, KOCHI_HARBOUR.lon]} icon={harbourIcon} interactive={false} keyboard={false} />
       {drawOrder.map((b) => (
         <BoatLayers key={b.id} boat={b} now={now} byId={byId} onMarker={onMarker} />
