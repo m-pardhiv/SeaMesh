@@ -18,9 +18,13 @@ const { WebSocketServer } = require("ws");
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY || "";
 const SOS_HOLD_MS = (Number(process.env.SOS_HOLD_MIN) || 10) * 60 * 1000;
-// A boat repeats its SOS for up to 60 s until its LoRa ACK arrives, so repeats
-// of an SOS the operator already cleared are ignored for this long
-const RESOLVED_REPEAT_MS = 60 * 1000;
+// A boat repeats its SOS every ~4 s (up to 15 times) until its LoRa ACK arrives.
+// When the operator clears an SOS while that series is still arriving, the rest
+// of the series is ignored. The series is over once no SOS packet has come for
+// this long (a bit over two repeat intervals; the dashboard clears an SOS 10 s
+// after Acknowledge, by when a boat that got its ACK has stopped), so the next
+// button press is always a new alert, with no waiting.
+const SOS_SERIES_GAP_MS = (Number(process.env.SOS_SERIES_GAP_S) || 9) * 1000;
 const TRAIL_LEN = 20;
 const MAX_EVENTS = 200;
 const MAX_BODY = 4096;
@@ -58,8 +62,12 @@ function applyPacket(p) {
   boat.trail.push([p.lat, p.lon]);
   if (boat.trail.length > TRAIL_LEN) boat.trail.shift();
 
-  const repeatOfResolved = boat.resolvedAt && now - boat.resolvedAt < RESOLVED_REPEAT_MS;
-  if (p.type === "S" && !repeatOfResolved) {
+  const isSos = p.type === "S";
+  const sinceLastSos = boat.lastSosPacketAt ? now - boat.lastSosPacketAt : Infinity;
+  if (isSos) boat.lastSosPacketAt = now;
+  const restOfClearedSeries = isSos && boat.ignoreSeries && sinceLastSos < SOS_SERIES_GAP_MS;
+  if (isSos && !restOfClearedSeries) {
+    boat.ignoreSeries = false;
     if (boat.status !== "sos") {
       boat.sosSince = now;
       const why = p.trigger === "WATER" ? "water sensor" : "SOS button";
@@ -69,7 +77,7 @@ function applyPacket(p) {
     boat.trigger = p.trigger;
     boat.lastSos = now;
     boat.acked = true;   // the uploading phone now tells its ESP32 to send the LoRa ACK
-  } else {
+  } else if (!isSos) {
     addEvent("position", p.boat, `Position from ${p.boat}, ${describeRoute(p)}`);
   }
 
@@ -186,7 +194,8 @@ const server = http.createServer(async (req, res) => {
     const boat = boats.get(resolve[1]);
     if (!boat) return send(res, 404, { error: "unknown boat" });
     if (boat.status === "sos") {
-      boat.resolvedAt = Date.now();
+      // still receiving this boat's SOS series? then ignore the rest of it
+      boat.ignoreSeries = !!boat.lastSosPacketAt && Date.now() - boat.lastSosPacketAt < SOS_SERIES_GAP_MS;
       clearSos(boat, "acknowledged by the shore operator and cleared");
       console.log(`RESOLVED ${boat.id} by operator`);
     }
