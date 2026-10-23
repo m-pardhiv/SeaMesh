@@ -15,13 +15,14 @@
 #include <LoRa.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include "dashboard.h"
 
 // ================= Per-boat settings =================
 #define BOAT_ID   "A"          // A, B, C ... (letters/numbers only)
 #define WIFI_SSID ""           // phone hotspot = this boat's "cellular". "" = no signal
 #define WIFI_PASS ""
-#define BASE_LAT  9.9500       // simulated GPS start position (off Kochi)
-#define BASE_LON  75.9500
+#define BASE_LAT  0            // simulated GPS start position; 0 = pick a sea
+#define BASE_LON  0            // position off Kochi from BOAT_ID (see initPosition)
 #define USE_WATER_SENSOR true  // two bare wires on GPIO4 (touch pin)
 // =====================================================
 
@@ -60,7 +61,7 @@ struct Packet {
 
 // ---------- state ----------
 uint16_t nextMsgId = 1;
-float curLat = BASE_LAT, curLon = BASE_LON;
+float curLat, curLon;
 unsigned long lastPos = 0;
 bool forceOffline = false;
 bool serverStarted = false;
@@ -85,9 +86,11 @@ struct Queued { bool used; Packet p; unsigned long due; };
 Queued queue[QUEUE_SIZE];
 
 // dashboard (only used when this boat is online)
+#define TRAIL_LEN 10
 struct BoatInfo {
   String id; float lat, lon; char type; int hops; String via;
   uint16_t msgId; unsigned long seenAt; int rssi; String trig;
+  float trailLat[TRAIL_LEN], trailLon[TRAIL_LEN]; int trailCount;
 };
 #define MAX_BOATS 8
 BoatInfo boats[MAX_BOATS];
@@ -228,18 +231,42 @@ void processQueue() {
 }
 
 // ---------- dashboard ----------
+// The dashboard keeps the last packet heard from every boat, so a boat that
+// goes silent stays on the map at its last known position.
 void upload(const Packet& p, int rssi) {
   int i = 0;
   while (i < boatCount && boats[i].id != p.origin) i++;
   if (i == boatCount) {
     if (boatCount == MAX_BOATS) return;
+    boats[i] = BoatInfo();
+    boats[i].id = p.origin;
+    boats[i].type = 'P';
     boatCount++;
   }
+  BoatInfo& b = boats[i];
+
   // an SOS stays on the map as SOS until that boat's SOS is over
-  char type = p.type;
-  if (type == 'P' && boats[i].id == p.origin && boats[i].type == 'S' &&
-      millis() - boats[i].seenAt < 60000) type = 'S';
-  boats[i] = { p.origin, p.lat, p.lon, type, p.hop, p.via, p.msgId, millis(), rssi, p.trig };
+  bool sosSticky = p.type == 'P' && b.type == 'S' && millis() - b.seenAt < 60000;
+  b.type = sosSticky ? 'S' : p.type;
+  if (!sosSticky) b.trig = p.trig;
+  b.lat = p.lat;
+  b.lon = p.lon;
+  b.hops = p.hop;
+  b.via = p.via;
+  b.msgId = p.msgId;
+  b.seenAt = millis();
+  b.rssi = rssi;
+
+  if (b.trailCount == TRAIL_LEN) {
+    for (int k = 1; k < TRAIL_LEN; k++) {
+      b.trailLat[k - 1] = b.trailLat[k];
+      b.trailLon[k - 1] = b.trailLon[k];
+    }
+    b.trailCount--;
+  }
+  b.trailLat[b.trailCount] = p.lat;
+  b.trailLon[b.trailCount] = p.lon;
+  b.trailCount++;
 
   String how = (p.origin == BOAT_ID) ? "own position"
              : (p.hop == 0 ? "direct" : String(p.hop) + " relay hop(s), last via " + p.via);
@@ -247,45 +274,6 @@ void upload(const Packet& p, int rssi) {
            " (" + how + ")" + (rssi != 0 ? ", RSSI " + String(rssi) : ""));
 }
 
-const char PAGE[] PROGMEM = R"rawliteral(<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SeaMesh Shore Dashboard</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>
-body{margin:0;font-family:system-ui,sans-serif;background:#0b1d2e;color:#e6eef5}
-header{padding:10px 14px;background:#102a43;display:flex;justify-content:space-between;align-items:center}
-h1{font-size:18px;margin:0}#gw{font-size:13px;opacity:.8}
-#sos{display:none;background:#c62828;color:#fff;padding:10px 14px;font-weight:700;animation:f 1s infinite}
-@keyframes f{50%{opacity:.6}}
-#map{height:55vh}#side{padding:10px 14px}
-.boat{background:#16324f;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:14px}
-.boat.S{border-left:5px solid #ef5350}.boat.P{border-left:5px solid #42a5f5}
-#log{font-family:monospace;font-size:12px;opacity:.85;white-space:pre-wrap}
-</style></head><body>
-<header><h1>SeaMesh Shore Dashboard</h1><span id="gw"></span></header>
-<div id="sos"></div><div id="map"></div>
-<div id="side"><div id="list"></div><h3>Event log</h3><div id="log"></div></div>
-<script>
-var map=null,markers={};
-if(window.L){map=L.map('map').setView([9.96,76.05],10);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap'}).addTo(map);}
-else{document.getElementById('map').innerHTML='<p style="padding:14px">Map needs internet - showing list only.</p>';}
-function route(b){return b.hops==0?(b.via==b.id?'direct':'via '+b.via):b.hops+' relay hop(s), last via '+b.via;}
-function tick(){fetch('/data').then(r=>r.json()).then(d=>{
- document.getElementById('gw').textContent='Gateway: boat '+d.gw+(d.online?' (online)':' (offline)');
- var sos=d.boats.filter(b=>b.type=='S');var s=document.getElementById('sos');
- s.style.display=sos.length?'block':'none';
- s.textContent=sos.map(b=>'SOS - Boat '+b.id+' at '+b.lat.toFixed(4)+', '+b.lon.toFixed(4)+' ('+b.trig+') received '+route(b)).join(' | ');
- document.getElementById('list').innerHTML=d.boats.map(b=>'<div class="boat '+b.type+'"><b>Boat '+b.id+'</b> - '+(b.type=='S'?'SOS ('+b.trig+')':'normal')+
-  '<br>'+b.lat.toFixed(5)+', '+b.lon.toFixed(5)+'<br>'+route(b)+' &middot; msg #'+b.msg+' &middot; '+b.age+'s ago'+(b.rssi?' &middot; RSSI '+b.rssi:'')+'</div>').join('')||'No boats heard yet.';
- document.getElementById('log').textContent=d.events.slice().reverse().join('\n');
- if(map)d.boats.forEach(b=>{var c=b.type=='S'?'#ef5350':'#42a5f5';
-  if(!markers[b.id])markers[b.id]=L.circleMarker([b.lat,b.lon],{radius:10}).addTo(map);
-  markers[b.id].setLatLng([b.lat,b.lon]).setStyle({color:c,fillColor:c,fillOpacity:.8}).bindTooltip('Boat '+b.id+(b.type=='S'?' SOS':''),{permanent:true});});
-}).catch(()=>{});}
-tick();setInterval(tick,2000);
-</script></body></html>)rawliteral";
 
 void handleData() {
   String j = "{\"gw\":\"" BOAT_ID "\",\"online\":" + String(online() ? "true" : "false") + ",\"boats\":[";
@@ -295,7 +283,12 @@ void handleData() {
     j += "{\"id\":\"" + b.id + "\",\"lat\":" + String(b.lat, 5) + ",\"lon\":" + String(b.lon, 5) +
          ",\"type\":\"" + String(b.type) + "\",\"hops\":" + String(b.hops) + ",\"via\":\"" + b.via +
          "\",\"msg\":" + String(b.msgId) + ",\"age\":" + String((millis() - b.seenAt) / 1000) +
-         ",\"rssi\":" + String(b.rssi) + ",\"trig\":\"" + b.trig + "\"}";
+         ",\"rssi\":" + String(b.rssi) + ",\"trig\":\"" + b.trig + "\",\"trail\":[";
+    for (int k = 0; k < b.trailCount; k++) {
+      if (k) j += ",";
+      j += "[" + String(b.trailLat[k], 5) + "," + String(b.trailLon[k], 5) + "]";
+    }
+    j += "]}";
   }
   j += "],\"events\":[";
   for (int i = 0; i < eventCount; i++) {
@@ -307,6 +300,19 @@ void handleData() {
 }
 
 // ---------- own messages ----------
+// Simulated GPS: every boat starts out at sea off Kochi, inside or outside
+// the ~20 km cellular coverage drawn on the dashboard.
+void initPosition() {
+  if (BASE_LAT != 0) { curLat = BASE_LAT; curLon = BASE_LON; return; }
+  switch (BOAT_ID[0]) {
+    case 'A': curLat = 9.9500; curLon = 75.9500; break;   // ~32 km out, no signal
+    case 'B': curLat = 9.9800; curLon = 76.1400; break;   // ~12 km out, in coverage
+    case 'C': curLat = 9.9650; curLon = 76.0400; break;   // ~24 km out, between them
+    default:  curLat = 9.9200 + random(0, 600) / 10000.0;
+              curLon = 75.9800 + random(0, 1000) / 10000.0; break;
+  }
+}
+
 Packet makeOwn(char type, const String& trig) {
   Packet p;
   p.type = type;
@@ -435,6 +441,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
   randomSeed(esp_random());
+  initPosition();
 
   Serial.println();
   Serial.println("=== SeaMesh node " BOAT_ID " ===");

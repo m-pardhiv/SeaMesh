@@ -58,6 +58,12 @@ Never power the board from USB and VIN at the same time.
 3. Select **ESP32 Dev Module** and upload.
 4. On the gateway boat, open the IP address printed in the Serial Monitor in the phone's browser to see the live map.
 
+### Dashboard
+
+- Blue pin: boat heard recently. Red pin: SOS. Grey dashed pin: **last known position**. The boat has not been heard for over 60 s, so the map keeps showing where it was last reported, with the time since contact.
+- Each boat shows a trail of its last 10 reported positions.
+- The green dashed circle marks the approximate cellular coverage (~20 km from Kochi), so boats outside it are the ones relying on the mesh.
+
 ### Serial commands (115200 baud)
 
 `sos`, `cancel`, `pos`, `offline` (gateway pretends to lose cellular and relays instead), `online`, `status`
@@ -66,5 +72,5 @@ Never power the board from USB and VIN at the same time.
 
 - Transmit power is set to the 2 dBm minimum because the test boards have no antennas, so the range is a few metres. Fit 433 MHz antennas before raising it.
 - In India, 433 MHz is license-free only at low power (about 10 mW). A deployment would move to the 865–867 MHz band (up to 1 W) with SX1276-based modules and mast-mounted antennas.
-- GPS positions are simulated (a fixed start point off Kochi with small drift).
+- GPS positions are simulated: each boat starts at sea off Kochi based on its ID (A ~32 km out, C ~24 km, B ~12 km, inside coverage) and drifts slightly.
 - The system only helps when another boat is within LoRa range; a lone boat far offshore still needs satellite.
