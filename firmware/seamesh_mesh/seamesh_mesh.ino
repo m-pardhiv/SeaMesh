@@ -23,7 +23,6 @@
 #define WIFI_PASS ""
 #define BASE_LAT  0            // simulated GPS start position; 0 = pick a sea
 #define BASE_LON  0            // position off Kochi from BOAT_ID (see initPosition)
-#define USE_WATER_SENSOR true  // two bare wires on GPIO4 (touch pin)
 // =====================================================
 
 // Radio - minimum power, because there is no antenna
@@ -40,8 +39,12 @@
 #define PIN_MISO 19
 #define PIN_MOSI 23
 
+// Sensors are optional: with nothing wired, both pins are held HIGH by the
+// internal pull-ups and read as "no emergency". A missing sensor is never a fault.
 #define PIN_SOS_BTN 27         // push button to GND
-#define PIN_WATER   4          // touch pin T0
+#define PIN_WATER   33         // bare wire; second bare wire to GND. Water bridging
+                               // them pulls the pin LOW (use salty water for the demo)
+#define WATER_WET_MS 2000      // must stay wet this long before it counts
 #define LED_PIN     2
 
 #define POS_INTERVAL    20000  // routine position update
@@ -71,8 +74,7 @@ String sosTrig = "";
 int sosRepeats = 0;
 unsigned long lastSos = 0;
 
-uint32_t waterBaseline = 0;
-int wetCount = 0;
+unsigned long wetSince = 0;
 bool lastBtn = HIGH;
 
 // duplicate filter
@@ -418,12 +420,11 @@ void checkInputs() {
   }
   lastBtn = btn;
 
-  static unsigned long lastWater = 0;
-  if (USE_WATER_SENSOR && waterBaseline > 0 && millis() - lastWater > 500) {
-    lastWater = millis();
-    uint32_t v = touchRead(PIN_WATER);
-    wetCount = (v < waterBaseline * 6 / 10) ? wetCount + 1 : 0;
-    if (wetCount == 3) triggerSos("WATER");
+  if (digitalRead(PIN_WATER) == LOW) {
+    if (wetSince == 0) wetSince = millis();
+    else if (millis() - wetSince > WATER_WET_MS) triggerSos("WATER");
+  } else {
+    wetSince = 0;
   }
 
   if (Serial.available()) {
@@ -447,6 +448,7 @@ void setup() {
   delay(1000);
   pinMode(LED_PIN, OUTPUT);
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
+  pinMode(PIN_WATER, INPUT_PULLUP);
   randomSeed(esp_random());
   initPosition();
 
@@ -470,12 +472,7 @@ void setup() {
   LoRa.enableCrc();
   Serial.println("[OK] LoRa 433 MHz, TX power " + String(TX_POWER) + " dBm (no antenna mode)");
 
-  if (USE_WATER_SENSOR) {
-    uint32_t sum = 0;
-    for (int i = 0; i < 10; i++) { sum += touchRead(PIN_WATER); delay(20); }
-    waterBaseline = sum / 10;
-    Serial.println("[OK] Water sensor baseline " + String(waterBaseline));
-  }
+  Serial.println("[OK] Sensors optional: SOS button D27, water D33 (nothing wired = no alert)");
 
   if (strlen(WIFI_SSID) > 0) {
     WiFi.mode(WIFI_STA);

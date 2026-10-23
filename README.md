@@ -22,7 +22,9 @@ The same firmware runs on every boat. A boat becomes a gateway automatically whe
 - ESP32 DevKit (30-pin)
 - Ra-02 LoRa module (SX1278, 433 MHz)
 - SOS push button (stranded boat)
-- Water sensor: two bare wires on a touch pin (stranded boat)
+- Water sensor: two bare wires (optional)
+
+Sensors are optional. In the demo only one unit has them; a unit with nothing wired never raises an alert or a fault.
 - Power: USB, or an HW-131 breadboard supply (5V to VIN)
 
 ### Wiring
@@ -41,7 +43,7 @@ The same firmware runs on every boat. A boat becomes a gateway automatically whe
 | Part | ESP32 |
 |---|---|
 | SOS button | D27 and GND |
-| Water sensor wires | D4 and GND (tips ~1 cm apart) |
+| Water sensor wires | D33 and GND (tips ~1 cm apart). Triggers after 2 s in water; use salty water for a reliable demo |
 
 Never power the board from USB and VIN at the same time.
 
