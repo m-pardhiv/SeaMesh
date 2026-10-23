@@ -222,7 +222,9 @@ void writeRadioReg(byte addr, byte v) {
 }
 
 bool startRadio() {
+  pinMode(PIN_DIO0, INPUT);
   LoRa.setPins(PIN_SS, PIN_RST, PIN_DIO0);
+  LoRa.setSPIFrequency(1E6);   // 1 MHz instead of 8: more tolerant of long jumper wires
   if (!LoRa.begin(FREQ)) return false;
   LoRa.setTxPower(TX_POWER);
   LoRa.setSyncWord(SYNC_WORD);
@@ -235,6 +237,30 @@ bool startRadio() {
 #define RADIO_RETRY_MS 10000
 bool radioOk = false;
 unsigned long lastRadioTry = 0;
+
+// With long breadboard jumpers, SPI writes sometimes land in the wrong register
+// and silently change the modem settings (seen: bandwidth 125 kHz -> 10 kHz).
+// Nodes with different settings can't hear each other, so the settings are
+// checked before every send and every RADIO_CHECK_MS, and re-applied if wrong.
+#define RADIO_CHECK_MS 3000
+unsigned long lastRadioCheck = 0;
+int radioFixes = 0;
+
+bool radioConfigOk() {
+  return readRadioReg(0x1D) == 0x72 &&       // BW 125 kHz, CR 4/5, explicit header
+         readRadioReg(0x1E) == 0x74 &&       // SF7, CRC on
+         readRadioReg(0x09) == (0x80 | (TX_POWER - 2)) &&   // PA_BOOST at TX_POWER
+         readRadioReg(0x39) == SYNC_WORD;
+}
+
+void ensureRadioConfig() {
+  lastRadioCheck = millis();
+  if (!radioOk || radioConfigOk()) return;
+  radioFixes++;
+  bool fixed = startRadio() && radioConfigOk();
+  Serial.println("RADIO settings were corrupted - re-applied (" + String(radioFixes) + " so far)" +
+                 (fixed ? "" : " - STILL WRONG, check the Ra-02 wiring"));
+}
 
 void tryRadio() {
   lastRadioTry = millis();
@@ -249,10 +275,12 @@ void tryRadio() {
 // LoRa.endPacket() in blocking mode waits forever for TX done, which froze the
 // whole node when the radio never reported it. Send asynchronously and give up
 // after TX_TIMEOUT_MS, logging the radio state and restarting the radio.
-#define REG_OP_MODE    0x01
-#define REG_IRQ_FLAGS  0x12
-#define IRQ_TX_DONE    0x08
-#define TX_TIMEOUT_MS  2000
+#define REG_OP_MODE       0x01
+#define REG_IRQ_FLAGS     0x12
+#define REG_DIO_MAPPING_1 0x40
+#define DIO0_TX_DONE      0x40   // DIO0 goes HIGH when a transmission finishes
+#define IRQ_TX_DONE       0x08
+#define TX_TIMEOUT_MS     2000
 
 void transmit(Packet p) {
   p.via = boatId;
@@ -261,12 +289,16 @@ void transmit(Packet p) {
     Serial.println("NORADIO not sent (no Ra-02): " + s);
     return;
   }
+  ensureRadioConfig();
   LoRa.beginPacket();
   LoRa.print(s);
+  writeRadioReg(REG_DIO_MAPPING_1, DIO0_TX_DONE);
   LoRa.endPacket(true);
 
+  // Wait on the DIO0 pin, not on SPI register reads: without an antenna, SPI
+  // reads during transmission come back corrupted, while DIO0 stays clean.
   unsigned long start = millis();
-  while ((readRadioReg(REG_IRQ_FLAGS) & IRQ_TX_DONE) == 0) {
+  while (digitalRead(PIN_DIO0) == LOW) {
     if (millis() - start > TX_TIMEOUT_MS) {
       Serial.println("TXERR no TX-done after " + String(TX_TIMEOUT_MS) + " ms: opmode=0x" +
                      String(readRadioReg(REG_OP_MODE), HEX) + " irq=0x" + String(readRadioReg(REG_IRQ_FLAGS), HEX) +
@@ -279,7 +311,7 @@ void transmit(Packet p) {
     }
     delay(1);
   }
-  writeRadioReg(REG_IRQ_FLAGS, IRQ_TX_DONE);
+  writeRadioReg(REG_IRQ_FLAGS, 0xFF);
   Serial.println("TX    " + s + "  (" + String(millis() - start) + " ms)");
   blink();
 }
@@ -524,21 +556,23 @@ void txTest(bool rfo) {
                  ", opmode before: 0x" + String(readRadioReg(REG_OP_MODE), HEX));
   LoRa.beginPacket();
   LoRa.print("TEST");
+  writeRadioReg(REG_DIO_MAPPING_1, DIO0_TX_DONE);
   LoRa.endPacket(true);
 
-  String trace = "";
-  byte lastMode = 0xFF, lastIrq = 0xFF;
+  // While transmitting, read the mode register repeatedly: anything other than
+  // standby/synth/TX (0x81-0x83) means the SPI read came back corrupted
+  int reads = 0, corrupted = 0;
   unsigned long start = millis();
-  while (millis() - start < 300) {
-    byte mode = readRadioReg(REG_OP_MODE), irq = readRadioReg(REG_IRQ_FLAGS);
-    if (mode != lastMode || irq != lastIrq) {
-      trace += String(millis() - start) + "ms mode=0x" + String(mode, HEX) + " irq=0x" + String(irq, HEX) + " | ";
-      lastMode = mode;
-      lastIrq = irq;
-    }
-    if (irq & IRQ_TX_DONE) break;
+  while (digitalRead(PIN_DIO0) == LOW && millis() - start < TX_TIMEOUT_MS) {
+    byte mode = readRadioReg(REG_OP_MODE);
+    reads++;
+    if (mode < 0x81 || mode > 0x83) corrupted++;
   }
-  Serial.println("TEST  " + trace);
+  unsigned long took = millis() - start;
+  bool done = digitalRead(PIN_DIO0) == HIGH;
+  Serial.println("TEST  " + String(done ? "TX done (DIO0 high) after " + String(took) + " ms"
+                                        : "NO TX done within " + String(TX_TIMEOUT_MS) + " ms") +
+                 " | corrupted SPI reads during TX: " + String(corrupted) + "/" + String(reads));
   writeRadioReg(REG_IRQ_FLAGS, 0xFF);
   if (rfo) LoRa.setTxPower(TX_POWER);   // back to PA_BOOST
 }
@@ -551,7 +585,8 @@ void printStatus() {
   Serial.println("STAT  boat " + boatId + " | phone " + String(bleConnected ? "connected" : "not connected") +
                  " | " + String(online() ? "ONLINE (gateway)" : "OFFLINE (relay)") +
                  " | SOS " + String(sosActive ? "active" : "off") + " | radio " +
-                 String(radioOk ? "OK" : "MISSING") + " | GPS " + gps +
+                 String(radioOk ? "OK" : "MISSING") + " (settings re-applied " + String(radioFixes) + "x)" +
+                 " | GPS " + gps +
                  " | uptime " + String(millis() / 1000) + " s | free heap " + String(ESP.getFreeHeap()) +
                  " (min " + String(ESP.getMinFreeHeap()) + ")");
 }
@@ -595,6 +630,14 @@ void checkInputs() {
     else if (cmd == "online") { forceOffline = false; Serial.println("MODE  online allowed"); }
     else if (cmd == "status") printStatus();
     else if (cmd == "txtest" || cmd == "txtest rfo") txTest(cmd == "txtest rfo");
+    else if (cmd == "regs") {
+      // modem settings; expected for SF7 / 125 kHz / CR 4/5 / CRC on:
+      // 0x1D=0x72, 0x1E=0x74, 0x26=0x04, sync word 0x39=0x5E
+      const byte regs[] = { 0x01, 0x06, 0x07, 0x08, 0x09, 0x1D, 0x1E, 0x26, 0x39, 0x40, 0x42 };
+      String out = "REGS ";
+      for (byte r : regs) out += "0x" + String(r, HEX) + "=0x" + String(readRadioReg(r), HEX) + " ";
+      Serial.println(out);
+    }
     else if (cmd == "hangtest") { Serial.println("TEST  freezing loop - watchdog should restart in ~8 s"); while (true) {} }
   }
 }
@@ -640,6 +683,7 @@ void loop() {
   handleBleInbox();
 
   if (!radioOk && millis() - lastRadioTry > RADIO_RETRY_MS) tryRadio();
+  if (radioOk && millis() - lastRadioCheck > RADIO_CHECK_MS) ensureRadioConfig();
 
   int size = radioOk ? LoRa.parsePacket() : 0;
   if (size) {
