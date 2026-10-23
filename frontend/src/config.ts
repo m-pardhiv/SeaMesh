@@ -1,7 +1,5 @@
-// Tunable constants. Change the reference point or thresholds here.
+// Tunable constants. Change the thresholds here.
 
-/** Reference point for "distance and direction from shore". */
-export const KOCHI_HARBOUR = { name: 'Kochi harbour', lat: 9.94, lon: 76.26 };
 
 export const MAP_CENTER: [number, number] = [9.96, 76.1];
 export const MAP_ZOOM = 10;

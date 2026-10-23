@@ -1,6 +1,6 @@
 import type { Boat } from '../types';
 import { isStale } from '../lib/boat';
-import { formatCoords, formatDuration, harbourLabel, triggerLabel } from '../lib/format';
+import { formatCoords, formatDuration, triggerLabel } from '../lib/format';
 
 interface Props {
   sosBoats: Boat[]; // newest first
@@ -28,7 +28,7 @@ export function SosBanner({ sosBoats, now, alarmActive, soundOn, clearingIn, onA
             <li key={b.id} className="sos-line">
               <p className="sos-text">
                 SOS - Boat {b.id} - <span className="mono">{formatCoords(b.lat, b.lon)}</span> - {triggerLabel(b.trigger)} -{' '}
-                {formatDuration(now - since)} ago - {harbourLabel(b.lat, b.lon)}
+                {formatDuration(now - since)} ago
               </p>
               <div className="sos-meta">
                 {b.acked

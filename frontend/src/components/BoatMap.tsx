@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import L from 'leaflet';
 import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import type { Boat } from '../types';
-import { KOCHI_HARBOUR, MAP_CENTER, MAP_ZOOM } from '../config';
+import { MAP_CENTER, MAP_ZOOM } from '../config';
 import { boatLook, isStale, searchRadiusKm, type BoatLook } from '../lib/boat';
 import { kmToLonDeg } from '../lib/geo';
-import { formatCoords, formatDuration, googleMapsUrl, harbourLabel, routeLabel, triggerLabel } from '../lib/format';
+import { formatCoords, formatDuration, googleMapsUrl, routeLabel, triggerLabel } from '../lib/format';
 
 export interface FocusRequest {
   id: string;
@@ -46,12 +46,6 @@ function textIcon(text: string, cls: string): L.DivIcon {
   return L.divIcon({ className: `map-text ${cls}`, iconSize: [0, 0], html: `<span>${esc(text)}</span>` });
 }
 
-const harbourIcon = L.divIcon({
-  className: 'harbour-icon',
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-  html: `<span class="harbour-dot"></span><span class="harbour-label">${esc(KOCHI_HARBOUR.name)}</span>`,
-});
 
 function BoatPopup({ boat, now }: { boat: Boat; now: number }) {
   const stale = isStale(boat, now);
@@ -65,7 +59,6 @@ function BoatPopup({ boat, now }: { boat: Boat; now: number }) {
       <p>Last seen {formatDuration(now - boat.lastSeen)} ago</p>
       {boat.status === 'sos' && <p>Trigger: {triggerLabel(boat.trigger)} · {boat.acked ? 'Delivered to boat ✓' : 'Not yet delivered to boat'}</p>}
       <p>Route: {routeLabel(boat)} · gateway {boat.gateway || '-'}</p>
-      <p>{harbourLabel(boat.lat, boat.lon)}</p>
       <p><a href={googleMapsUrl(boat.lat, boat.lon)} target="_blank" rel="noopener noreferrer">Open in Google Maps</a></p>
     </div>
   );
@@ -156,9 +149,7 @@ function AutoFit({ boats }: { boats: Boat[] }) {
     const fresh = boats.some((b) => !known.current.has(b.id));
     boats.forEach((b) => known.current.add(b.id));
     if (!fresh) return;
-    // Keep the harbour in view too, so distances and directions have a visible reference.
     const points: [number, number][] = boats.map((b) => [b.lat, b.lon]);
-    points.push([KOCHI_HARBOUR.lat, KOCHI_HARBOUR.lon]);
     map.fitBounds(L.latLngBounds(points), { padding: [70, 70], maxZoom: 12 });
   }, [boats, map]);
   return null;
@@ -213,7 +204,6 @@ export function BoatMap({ boats, now, focus }: Props) {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         maxZoom={18}
       />
-      <Marker position={[KOCHI_HARBOUR.lat, KOCHI_HARBOUR.lon]} icon={harbourIcon} interactive={false} keyboard={false} />
       {drawOrder.map((b) => (
         <BoatLayers key={b.id} boat={b} now={now} byId={byId} onMarker={onMarker} />
       ))}

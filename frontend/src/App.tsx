@@ -4,7 +4,7 @@ import { useLiveData } from './data/useLiveData';
 import { useNow } from './lib/useNow';
 import { sortBoats, sosKey } from './lib/boat';
 import { Alarm } from './lib/alarm';
-import { formatCoords, harbourLabel, triggerLabel } from './lib/format';
+import { formatCoords, triggerLabel } from './lib/format';
 import { StatusBar } from './components/StatusBar';
 import { SosBanner } from './components/SosBanner';
 import { BoatMap, type FocusRequest } from './components/BoatMap';
@@ -90,7 +90,7 @@ export default function App() {
   useEffect(() => {
     for (const b of sosBoats) {
       const key = sosKey(b);
-      const summary = `Boat ${b.id} at ${formatCoords(b.lat, b.lon)}, ${triggerLabel(b.trigger)}, ${harbourLabel(b.lat, b.lon)}`;
+      const summary = `Boat ${b.id} at ${formatCoords(b.lat, b.lon)}, ${triggerLabel(b.trigger)}`;
       if (!announced.current.has(key)) {
         announced.current.add(key);
         setAnnouncement(`SOS: ${summary}`);

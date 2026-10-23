@@ -1,6 +1,4 @@
 import type { Boat } from '../types';
-import { KOCHI_HARBOUR } from '../config';
-import { fromHarbour } from './geo';
 
 /** 12s, 3m 20s, 1h 5m */
 export function formatDuration(ms: number): string {
@@ -30,12 +28,6 @@ export function routeLabel(b: Boat): string {
   if (b.hops === 0 && b.via === b.id) return `direct to gateway ${b.gateway || '-'}`;
   if (b.hops === 0) return `relayed, last via ${b.via}`;
   return `${b.hops} hop${b.hops === 1 ? '' : 's'}, last via ${b.via}`;
-}
-
-/** "21.4 km WSW of Kochi harbour" */
-export function harbourLabel(lat: number, lon: number, withName = true): string {
-  const { km, dir } = fromHarbour(lat, lon);
-  return `${km.toFixed(1)} km ${dir}${withName ? ` of ${KOCHI_HARBOUR.name}` : ''}`;
 }
 
 export const googleMapsUrl = (lat: number, lon: number) =>

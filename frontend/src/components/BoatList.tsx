@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { Boat } from '../types';
-import { DRIFT_KMH, KOCHI_HARBOUR } from '../config';
+import { DRIFT_KMH } from '../config';
 import { isStale, searchRadiusKm } from '../lib/boat';
-import { formatCoords, formatDuration, googleMapsUrl, harbourLabel, routeLabel, triggerLabel } from '../lib/format';
+import { formatCoords, formatDuration, googleMapsUrl, routeLabel, triggerLabel } from '../lib/format';
 
 interface Props {
   boats: Boat[]; // already sorted: SOS, stale, normal
@@ -90,7 +90,6 @@ export function BoatList({ boats, now, onShow }: Props) {
                   <div><dt>Gateway</dt><dd className="mono">{b.gateway || '-'}</dd></div>
                   {/* the server sends rssi 0 when there was no radio hop (own upload) */}
                   <div><dt>RSSI</dt><dd className="mono">{Number.isFinite(b.rssi) && b.rssi !== 0 ? `${b.rssi} dBm` : '-'}</dd></div>
-                  <div><dt>From {KOCHI_HARBOUR.name}</dt><dd>{harbourLabel(b.lat, b.lon, false)}</dd></div>
                 </dl>
 
                 <div className="actions">

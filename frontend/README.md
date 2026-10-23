@@ -49,11 +49,11 @@ See [src/types.ts](src/types.ts) for the `Boat` and `Event` fields.
 
 ## What the operator sees
 
-- **SOS banner**: full width at the top while any boat has `status: "sos"`, one line per boat, newest first. For example: `SOS - Boat 3F2A - 9.95123, 75.94877 - water sensor - 2m 10s ago - 21.4 km WSW of Kochi harbour`. It also shows "Delivered to boat ✓" once `acked` is true. The banner stays until the boat is back to `normal`.
+- **SOS banner**: full width at the top while any boat has `status: "sos"`, one line per boat, newest first. For example: `SOS - Boat 3F2A - 9.95123, 75.94877 - water sensor - 2m 10s ago`. It also shows "Delivered to boat ✓" once `acked` is true. The banner stays until the boat is back to `normal`.
 - **Alarm**: browsers block audio until the page is clicked, so press **Enable sound & notifications** once per session. After that, a looping alarm plays and a browser notification fires for each new SOS. **Acknowledge** only silences the alarm on this screen. A new SOS starts it again.
 - **Last known location**: a boat is stale after 60 s without a packet. It stays on the map in grey with a dashed outline and "LAST KNOWN - no contact for …". A silent SOS boat gets an **estimated** search-area circle of radius `max(0.5, 1.5 × hours since last seen)` km (assumes about 1.5 km/h drift).
 - **Map**: OpenStreetMap tiles, darkened. Each boat has a trail, and a dashed amber line shows the mesh route (boat → last relay → gateway) for relayed packets.
-- **Boat list**: sorted SOS, then stale, then normal. Shows coordinates, live "last seen", route, gateway, RSSI, and distance and direction from Kochi harbour, with Copy coordinates and Open in Google Maps buttons. Click a boat to fly the map to it.
+- **Boat list**: sorted SOS, then stale, then normal. Shows coordinates, live "last seen", route, gateway, RSSI, with Copy coordinates and Open in Google Maps buttons. Click a boat to fly the map to it.
 - **Event log**: newest first, HH:MM:SS, SOS in red, last 200 kept.
 
 ## Demo mode
