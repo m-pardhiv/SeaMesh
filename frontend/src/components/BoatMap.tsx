@@ -18,8 +18,8 @@ interface Props {
   focus: FocusRequest | null;
 }
 
-const COLORS: Record<BoatLook, string> = { normal: '#2F6FB3', sos: '#C8352B', stale: '#6B7458' };
-const MESH_COLOR = '#B8920A';
+const COLORS: Record<BoatLook, string> = { normal: '#49DC7A', sos: '#FF6B00', stale: '#8A9A98' };
+const MESH_COLOR = '#22F2EF';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
@@ -199,6 +199,7 @@ export function BoatMap({ boats, now, focus }: Props) {
 
   return (
     <MapContainer center={MAP_CENTER} zoom={MAP_ZOOM} className="map" worldCopyJump>
+      {/* Standard OpenStreetMap tiles (no API key); styles.css turns them dark to match the theme */}
       <TileLayer
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

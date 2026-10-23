@@ -8,6 +8,9 @@ interface Props {
   boats: Boat[]; // already sorted: SOS, stale, normal
   now: number;
   onShow: (id: string) => void;
+  /** all boats before the search filter, for the header count */
+  total: number;
+  query: string;
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -42,15 +45,15 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function BoatList({ boats, now, onShow }: Props) {
+export function BoatList({ boats, now, onShow, total, query }: Props) {
   return (
-    <section className="panel" aria-labelledby="boats-title">
+    <section className="card" id="boats-card" aria-labelledby="boats-title">
       <div className="panel-head">
         <h2 id="boats-title">Boats</h2>
-        <span className="muted">{boats.length} tracked · SOS first</span>
+        <span className="muted">{query ? `${boats.length} of ${total} match "${query}"` : `${total} tracked · SOS first`}</span>
       </div>
       {boats.length === 0 ? (
-        <p className="empty">Waiting for the first boat to report...</p>
+        <p className="empty">{query ? `No boat matches "${query}".` : 'Waiting for the first boat to report...'}</p>
       ) : (
         <ul className="boat-list">
           {boats.map((b) => {

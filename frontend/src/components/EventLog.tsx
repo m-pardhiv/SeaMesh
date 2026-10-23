@@ -6,7 +6,7 @@ const TYPE_LABEL: Record<SeaEvent['type'], string> = { sos: 'SOS', position: 'PO
 
 export function EventLog({ events }: { events: SeaEvent[] }) {
   return (
-    <section className="panel" aria-labelledby="events-title">
+    <section className="card events-card" id="events-card" aria-labelledby="events-title">
       <div className="panel-head">
         <h2 id="events-title">Event log</h2>
         <span className="muted">Newest first · last {MAX_EVENTS} kept</span>
