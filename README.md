@@ -2,7 +2,7 @@
 
 Low-cost boat-to-boat LoRa mesh that keeps fishing boats trackable after they lose cellular coverage offshore. Each boat broadcasts its position and SOS alerts over license-free LoRa. Nearby boats relay the packets hop by hop until a boat with signal uploads them to the shore dashboard.
 
-This repo holds the hackathon prototype. Phones stand in for Kerala's existing GPS/GPRS systems: a phone hotspot plays the part of a boat's cellular link, and the gateway ESP32 serves a live map dashboard to that phone.
+This repo holds the hackathon prototype. Phones stand in for Kerala's existing GPS/GPRS systems: a phone hotspot plays the part of a boat's cellular link, and the gateway ESP32 exposes a JSON API that the React dashboard reads.
 
 ## How it works
 
@@ -56,13 +56,47 @@ Never power the board from USB and VIN at the same time.
    ```
    Do not commit real hotspot passwords.
 3. Select **ESP32 Dev Module** and upload.
-4. On the gateway boat, open the IP address printed in the Serial Monitor in the phone's browser to see the live map.
+4. The gateway boat prints its data URL in the Serial Monitor, e.g. `http://192.168.43.120/data`. Point the React dashboard at it.
 
-### Dashboard
+### Gateway API (for the React dashboard)
 
-- Blue pin: boat heard recently. Red pin: SOS. Grey dashed pin: **last known position**. The boat has not been heard for over 60 s, so the map keeps showing where it was last reported, with the time since contact.
-- Each boat shows a trail of its last 10 reported positions.
-- The green dashed circle marks the approximate cellular coverage (~20 km from Kochi), so boats outside it are the ones relying on the mesh.
+`GET http://<gateway IP>/data` returns the last packet heard from every boat. CORS is open (`Access-Control-Allow-Origin: *`). Poll it every 2 s or so.
+
+```json
+{
+  "gw": "B",
+  "online": true,
+  "uptime": 845,
+  "boats": [
+    {
+      "id": "A",
+      "lat": 9.95012, "lon": 75.94988,
+      "type": "S",
+      "hops": 0, "via": "A",
+      "msg": 17,
+      "age": 4, "stale": false,
+      "rssi": -62,
+      "trig": "BTN",
+      "trail": [[9.95001, 75.95003], [9.95012, 75.94988]]
+    }
+  ],
+  "events": ["812s  SOS from boat A (direct), RSSI -62"]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `type` | `P` = normal position, `S` = SOS |
+| `hops` / `via` | Relay hops taken, and the last boat that transmitted it (`hops: 0` = heard directly) |
+| `age` | Seconds since this boat was last heard |
+| `stale` | `true` after 60 s without contact. Show the position as **last known** |
+| `trig` | What raised the SOS: `BTN` (button) or `WATER` (immersion sensor) |
+| `trail` | Last 10 reported positions, oldest first |
+| `rssi` | Signal strength in dBm (`0` for the gateway's own position) |
+
+A boat that goes silent stays in the list at its last reported position, so the dashboard can always show a last known location.
+
+The API is plain HTTP on the hotspot's local network. Run the React app from the phone or laptop on that hotspot (e.g. the dev server). A dashboard served over HTTPS cannot fetch from it, because browsers block mixed content.
 
 ### Serial commands (115200 baud)
 

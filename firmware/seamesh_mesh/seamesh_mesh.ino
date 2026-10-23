@@ -4,6 +4,7 @@
 //  - Boat WITHOUT signal: broadcasts its own position/SOS and relays others.
 //  - Boat WITH signal (joined to the phone hotspot = "cellular"): uploads
 //    every packet it hears to the dashboard and ACKs SOS messages.
+//    The React dashboard reads it as JSON from http://<gateway IP>/data
 //
 // Packet (text, ~45 bytes):
 //   type,origin,msgId,lat,lon,time,hop,trigger,via
@@ -15,7 +16,6 @@
 #include <LoRa.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include "dashboard.h"
 
 // ================= Per-boat settings =================
 #define BOAT_ID   "A"          // A, B, C ... (letters/numbers only)
@@ -274,15 +274,22 @@ void upload(const Packet& p, int rssi) {
            " (" + how + ")" + (rssi != 0 ? ", RSSI " + String(rssi) : ""));
 }
 
+#define STALE_SEC 60   // no contact for this long = shown as "last known"
 
+// JSON API for the React dashboard (CORS open so it can run on any origin)
 void handleData() {
-  String j = "{\"gw\":\"" BOAT_ID "\",\"online\":" + String(online() ? "true" : "false") + ",\"boats\":[";
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-store");
+  String j = "{\"gw\":\"" BOAT_ID "\",\"online\":" + String(online() ? "true" : "false") +
+             ",\"uptime\":" + String(uptimeSec()) + ",\"boats\":[";
   for (int i = 0; i < boatCount; i++) {
     BoatInfo& b = boats[i];
+    unsigned long age = (millis() - b.seenAt) / 1000;
     if (i) j += ",";
     j += "{\"id\":\"" + b.id + "\",\"lat\":" + String(b.lat, 5) + ",\"lon\":" + String(b.lon, 5) +
          ",\"type\":\"" + String(b.type) + "\",\"hops\":" + String(b.hops) + ",\"via\":\"" + b.via +
-         "\",\"msg\":" + String(b.msgId) + ",\"age\":" + String((millis() - b.seenAt) / 1000) +
+         "\",\"msg\":" + String(b.msgId) + ",\"age\":" + String(age) +
+         ",\"stale\":" + String(age > STALE_SEC ? "true" : "false") +
          ",\"rssi\":" + String(b.rssi) + ",\"trig\":\"" + b.trig + "\",\"trail\":[";
     for (int k = 0; k < b.trailCount; k++) {
       if (k) j += ",";
@@ -301,7 +308,7 @@ void handleData() {
 
 // ---------- own messages ----------
 // Simulated GPS: every boat starts out at sea off Kochi, inside or outside
-// the ~20 km cellular coverage drawn on the dashboard.
+// the ~20 km cellular coverage around Kochi.
 void initPosition() {
   if (BASE_LAT != 0) { curLat = BASE_LAT; curLon = BASE_LON; return; }
   switch (BOAT_ID[0]) {
@@ -480,7 +487,10 @@ void setup() {
     Serial.println("[--] No hotspot set - this boat has no signal, will relay over LoRa");
   }
 
-  server.on("/", []() { server.send_P(200, "text/html", PAGE); });
+  server.on("/", []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"service\":\"SeaMesh gateway\",\"boat\":\"" BOAT_ID "\",\"data\":\"/data\"}");
+  });
   server.on("/data", handleData);
   Serial.println("Commands: sos, cancel, pos, offline, online, status");
   Serial.println("--------------------------");
@@ -491,7 +501,7 @@ void loop() {
   if (!serverStarted && WiFi.status() == WL_CONNECTED) {
     server.begin();
     serverStarted = true;
-    Serial.println("[OK] Online - dashboard at http://" + WiFi.localIP().toString());
+    Serial.println("[OK] Online - dashboard data at http://" + WiFi.localIP().toString() + "/data");
     addEvent("Gateway boat " BOAT_ID " online");
   }
   if (serverStarted) server.handleClient();
