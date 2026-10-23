@@ -88,7 +88,8 @@ export function BoatList({ boats, now, onShow }: Props) {
                   <div><dt>Last seen</dt><dd>{formatDuration(now - b.lastSeen)} ago</dd></div>
                   <div><dt>Route</dt><dd>{routeLabel(b)}</dd></div>
                   <div><dt>Gateway</dt><dd className="mono">{b.gateway || '-'}</dd></div>
-                  <div><dt>RSSI</dt><dd className="mono">{Number.isFinite(b.rssi) ? `${b.rssi} dBm` : '-'}</dd></div>
+                  {/* the server sends rssi 0 when there was no radio hop (own upload) */}
+                  <div><dt>RSSI</dt><dd className="mono">{Number.isFinite(b.rssi) && b.rssi !== 0 ? `${b.rssi} dBm` : '-'}</dd></div>
                   <div><dt>From {KOCHI_HARBOUR.name}</dt><dd>{harbourLabel(b.lat, b.lon, false)}</dd></div>
                 </dl>
 

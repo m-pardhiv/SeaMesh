@@ -17,7 +17,7 @@ npm run dev           # real server, needs VITE_API_URL (see below)
 For the real server, create `.env.local`:
 
 ```sh
-VITE_API_URL=https://seamesh-api.onrender.com
+VITE_API_URL=https://seamesh.onrender.com
 ```
 
 | Variable       | Meaning                                                                          |
@@ -31,7 +31,7 @@ These are baked in at build time, so rebuild after changing them.
 
 - Build command: `npm install && npm run build`
 - Publish directory: `dist`
-- Environment: `VITE_API_URL=https://<your-server>.onrender.com` (or `VITE_DEMO=1` for a demo deployment)
+- Environment: `VITE_API_URL=https://seamesh.onrender.com` (or `VITE_DEMO=1` for a demo deployment)
 
 The dashboard is served over https, so the API must be https too (browsers block `http://` and `ws://` from an https page).
 

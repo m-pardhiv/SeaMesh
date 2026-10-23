@@ -24,9 +24,10 @@ export function triggerLabel(trigger: Boat['trigger']): string {
   return 'trigger unknown';
 }
 
-/** "direct" or "2 hops, last via 91C0" */
+/** "own upload (boat's phone)", "direct to gateway C3D4" or "2 hops, last via 91C0" */
 export function routeLabel(b: Boat): string {
-  if (b.hops === 0 && b.via === b.id) return 'direct';
+  if (b.hops === 0 && b.id === b.gateway) return "own upload (boat's phone)";
+  if (b.hops === 0 && b.via === b.id) return `direct to gateway ${b.gateway || '-'}`;
   if (b.hops === 0) return `relayed, last via ${b.via}`;
   return `${b.hops} hop${b.hops === 1 ? '' : 's'}, last via ${b.via}`;
 }
