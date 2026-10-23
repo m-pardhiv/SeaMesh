@@ -116,8 +116,8 @@ export default function App() {
   // ----- Map focus -----
   const [focus, setFocus] = useState<FocusRequest | null>(null);
   const mapRef = useRef<HTMLElement>(null);
-  const showBoat = useCallback((id: string) => {
-    setFocus((f) => ({ id, nonce: (f?.nonce ?? 0) + 1 }));
+  const showBoat = useCallback((id: string, zoom?: number) => {
+    setFocus((f) => ({ id, zoom, nonce: (f?.nonce ?? 0) + 1 }));
     // On phones the map is above the panels; bring it into view.
     if (window.matchMedia('(max-width: 899px)').matches) {
       const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -145,8 +145,25 @@ export default function App() {
   // ----- Ticket card: the boat picked on the map or list, else the newest SOS, else the first boat -----
   const picked = focus ? boats.find((b) => b.id === focus.id) : undefined;
   const focusBoat = picked ?? sosBoats[0] ?? boats[0] ?? null;
-  const focusReason = picked ? 'selected' : sosBoats[0] ? 'sos' : 'first';
+  const focusReason = focusBoat?.status === 'sos' ? 'sos' : picked ? 'selected' : 'first';
 
+
+  // A new SOS flies the map to the boat in trouble and opens its popup (also when the page is
+  // opened during an SOS). Once every SOS is cleared the view goes back to the whole fleet.
+  const zoomedSos = useRef(new Set<string>());
+  const hadSos = useRef(false);
+  const [refit, setRefit] = useState(0);
+  useEffect(() => {
+    const fresh = sosBoats.find((b) => !zoomedSos.current.has(sosKey(b))); // sosBoats is newest first
+    sosBoats.forEach((b) => zoomedSos.current.add(sosKey(b)));
+    if (fresh) showBoat(fresh.id, 13);
+    if (sosBoats.length) hadSos.current = true;
+    else if (hadSos.current) {
+      hadSos.current = false;
+      setFocus(null);
+      setRefit((n) => n + 1);
+    }
+  }, [sosKeysJoined, showBoat]);
 
   return (
     <div className={`app${sosBoats.length ? ' app--sos' : ''}`}>
@@ -203,7 +220,7 @@ export default function App() {
         </div>
 
         <section className="card map-card col-map" id="map-card" aria-label="Map" ref={mapRef}>
-          <BoatMap boats={boats} now={now} focus={focus} />
+          <BoatMap boats={boats} now={now} focus={focus} holdView={sosBoats.length > 0} refit={refit} />
           <div className="map-chip map-chip--title" aria-hidden="true">
             <span className={`conn-dot conn-dot--${conn}`} /> Live map · {boats.length} boat{boats.length === 1 ? '' : 's'}
           </div>

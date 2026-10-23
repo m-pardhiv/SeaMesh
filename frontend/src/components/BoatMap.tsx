@@ -10,12 +10,18 @@ import { formatCoords, formatDuration, googleMapsUrl, routeLabel, triggerLabel }
 export interface FocusRequest {
   id: string;
   nonce: number;
+  /** minimum zoom to fly to (default 12) */
+  zoom?: number;
 }
 
 interface Props {
   boats: Boat[];
   now: number;
   focus: FocusRequest | null;
+  /** an SOS is active: do not pull the view back to the whole fleet when a new boat appears */
+  holdView: boolean;
+  /** bump to fit the view to all boats again (e.g. after the last SOS is cleared) */
+  refit: number;
 }
 
 const COLORS: Record<BoatLook, string> = { normal: '#49DC7A', sos: '#FF3B3B', stale: '#8A9A98' };
@@ -138,9 +144,20 @@ function BoatLayers({ boat, now, byId, onMarker }: {
 }
 
 /** Fit the view to all boats whenever a boat id appears that we have not seen. */
-function AutoFit({ boats }: { boats: Boat[] }) {
+function AutoFit({ boats, holdView, refit }: { boats: Boat[]; holdView: boolean; refit: number }) {
   const map = useMap();
   const known = useRef(new Set<string>());
+  const lastRefit = useRef(refit);
+  const boatsRef = useRef(boats);
+  boatsRef.current = boats;
+
+  const fitAll = () => {
+    const points: [number, number][] = boatsRef.current.map((b) => [b.lat, b.lon]);
+    if (points.length === 0) return;
+    // Extra room on the left: the "ESTIMATED search area" label sits west of a silent SOS boat
+    map.fitBounds(L.latLngBounds(points), { paddingTopLeft: [260, 70], paddingBottomRight: [90, 70], maxZoom: 12 });
+  };
+
   useEffect(() => {
     if (boats.length === 0) {
       known.current.clear();
@@ -148,11 +165,15 @@ function AutoFit({ boats }: { boats: Boat[] }) {
     }
     const fresh = boats.some((b) => !known.current.has(b.id));
     boats.forEach((b) => known.current.add(b.id));
-    if (!fresh) return;
-    const points: [number, number][] = boats.map((b) => [b.lat, b.lon]);
-    // Extra room on the left: the "ESTIMATED search area" label sits west of a silent SOS boat
-    map.fitBounds(L.latLngBounds(points), { paddingTopLeft: [260, 70], paddingBottomRight: [90, 70], maxZoom: 12 });
-  }, [boats, map]);
+    if (fresh && !holdView) fitAll();
+  }, [boats, map, holdView]);
+
+  useEffect(() => {
+    if (refit !== lastRefit.current) {
+      lastRefit.current = refit;
+      fitAll();
+    }
+  }, [refit]);
   return null;
 }
 
@@ -175,7 +196,7 @@ function FocusHandler({ focus, boats, markers }: {
       opened = true;
       markers.current.get(boat.id)?.openPopup();
     };
-    const zoom = Math.max(map.getZoom(), 12);
+    const zoom = Math.max(map.getZoom(), focus.zoom ?? 12);
     map.once('moveend', open);
     if (reducedMotion()) map.setView([boat.lat, boat.lon], zoom, { animate: false });
     else map.flyTo([boat.lat, boat.lon], zoom, { duration: 0.8 });
@@ -188,7 +209,7 @@ function FocusHandler({ focus, boats, markers }: {
   return null;
 }
 
-export function BoatMap({ boats, now, focus }: Props) {
+export function BoatMap({ boats, now, focus, holdView, refit }: Props) {
   const markers = useRef(new Map<string, L.Marker>());
   const byId = useMemo(() => new Map(boats.map((b) => [b.id, b])), [boats]);
   const onMarker = (id: string, m: L.Marker | null) => {
@@ -209,7 +230,7 @@ export function BoatMap({ boats, now, focus }: Props) {
       {drawOrder.map((b) => (
         <BoatLayers key={b.id} boat={b} now={now} byId={byId} onMarker={onMarker} />
       ))}
-      <AutoFit boats={boats} />
+      <AutoFit boats={boats} holdView={holdView} refit={refit} />
       <FocusHandler focus={focus} boats={boats} markers={markers} />
     </MapContainer>
   );
