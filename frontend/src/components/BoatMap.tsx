@@ -18,7 +18,7 @@ interface Props {
   focus: FocusRequest | null;
 }
 
-const COLORS: Record<BoatLook, string> = { normal: '#49DC7A', sos: '#FF6B00', stale: '#8A9A98' };
+const COLORS: Record<BoatLook, string> = { normal: '#49DC7A', sos: '#FF3B3B', stale: '#8A9A98' };
 const MESH_COLOR = '#22F2EF';
 
 const esc = (s: string) =>
@@ -150,7 +150,8 @@ function AutoFit({ boats }: { boats: Boat[] }) {
     boats.forEach((b) => known.current.add(b.id));
     if (!fresh) return;
     const points: [number, number][] = boats.map((b) => [b.lat, b.lon]);
-    map.fitBounds(L.latLngBounds(points), { padding: [70, 70], maxZoom: 12 });
+    // Extra room on the left: the "ESTIMATED search area" label sits west of a silent SOS boat
+    map.fitBounds(L.latLngBounds(points), { paddingTopLeft: [260, 70], paddingBottomRight: [90, 70], maxZoom: 12 });
   }, [boats, map]);
   return null;
 }

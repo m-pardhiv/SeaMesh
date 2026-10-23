@@ -1,5 +1,5 @@
 /* SeaMesh Shore Dashboard: dark glass theme (near-black + teal glow), Outfit type,
-   green = live / OK, orange = SOS, cyan = mesh route and info.
+   green = live / OK, red = SOS, cyan = mesh route and info, amber = warnings.
    Desktop: the whole dashboard fits one screen; long lists scroll inside their card. */
 
 :root {
@@ -15,10 +15,11 @@
   --green: #49DC7A;
   --green-soft: rgba(73, 220, 122, 0.14);
   --cyan: #22F2EF;
-  /* The palette image labels this swatch #C923F8 (a purple); the swatch itself is this orange */
-  --orange: #FF6B00;
-  --orange-ink: #FF9A55;
-  --orange-soft: rgba(255, 107, 0, 0.16);
+  --red: #FF3B3B;
+  --red-ink: #FF8A80;
+  --red-soft: rgba(255, 59, 59, 0.16);
+  --amber: #FFB020;
+  --amber-soft: rgba(255, 176, 32, 0.14);
   --grey: #8A9A98;
 
   --radius: 20px;
@@ -186,16 +187,16 @@ a { color: var(--cyan); }
   white-space: nowrap;
 }
 .stat strong { color: var(--text); font: 600 15px var(--sans); }
-.stat--sos { border-color: rgba(255, 107, 0, 0.55); background: var(--orange-soft); }
-.stat--sos strong { color: var(--orange-ink); }
+.stat--sos { border-color: rgba(255, 59, 59, 0.55); background: var(--red-soft); }
+.stat--sos strong { color: var(--red-ink); }
 .clock { font-size: 15px; font-weight: 500; color: var(--text); padding-left: 2px; }
 
 .conn { font-weight: 500; }
 .conn-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex: none; }
 .conn--live { color: var(--green); }
 .conn--live .conn-dot, .conn-dot--live { color: var(--green); animation: live 2s infinite; }
-.conn--connecting, .conn--reconnecting, .conn-dot--connecting, .conn-dot--reconnecting { color: var(--orange-ink); }
-.conn--offline, .conn-dot--offline { color: var(--orange); }
+.conn--connecting, .conn--reconnecting, .conn-dot--connecting, .conn-dot--reconnecting { color: var(--amber); }
+.conn--offline, .conn-dot--offline { color: var(--red); }
 
 @keyframes live {
   0% { box-shadow: 0 0 0 0 rgba(73, 220, 122, 0.6); }
@@ -224,7 +225,7 @@ a { color: var(--cyan); }
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--orange);
+  background: var(--red);
   box-shadow: 0 0 0 2px var(--bg);
 }
 
@@ -244,9 +245,9 @@ a { color: var(--cyan); }
   margin: 8px var(--pad) 0;
   padding: 8px 14px;
   border-radius: var(--radius-sm);
-  background: var(--orange-soft);
-  border: 1px solid rgba(255, 107, 0, 0.5);
-  color: var(--orange-ink);
+  background: var(--amber-soft);
+  border: 1px solid rgba(255, 176, 32, 0.5);
+  color: var(--amber);
   font-weight: 500;
 }
 
@@ -256,8 +257,8 @@ a { color: var(--cyan); }
   margin: 10px var(--pad) 0;
   padding: 10px 16px;
   border-radius: 16px;
-  border: 1px solid rgba(255, 107, 0, 0.7);
-  background: linear-gradient(100deg, rgba(255, 107, 0, 0.38), rgba(255, 107, 0, 0.14) 60%, rgba(4, 10, 10, 0.6));
+  border: 1px solid rgba(255, 59, 59, 0.7);
+  background: linear-gradient(100deg, rgba(255, 59, 59, 0.38), rgba(255, 59, 59, 0.14) 60%, rgba(4, 10, 10, 0.6));
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   display: flex;
@@ -269,8 +270,8 @@ a { color: var(--cyan); }
   animation: sos-glow 1.6s ease-in-out infinite;
 }
 @keyframes sos-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 0, 0.0), 0 14px 40px rgba(255, 107, 0, 0.18); }
-  50% { box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.35), 0 14px 40px rgba(255, 107, 0, 0.32); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 59, 0.0), 0 14px 40px rgba(255, 59, 59, 0.18); }
+  50% { box-shadow: 0 0 0 3px rgba(255, 59, 59, 0.35), 0 14px 40px rgba(255, 59, 59, 0.32); }
 }
 
 .sos-lines { flex: 1 1 520px; display: flex; flex-direction: column; gap: 6px; }
@@ -291,8 +292,8 @@ a { color: var(--cyan); }
 
 .btn--banner { background: rgba(4, 10, 10, 0.4); border-color: rgba(255, 255, 255, 0.4); color: #fff; min-height: 32px; font-size: 12.5px; }
 .btn--banner:hover { background: rgba(4, 10, 10, 0.6); border-color: #fff; }
-.btn--ack { background: #fff; color: #C24E00; border-color: #fff; min-height: 42px; padding: 0 24px; font-size: 15.5px; font-weight: 600; }
-.btn--ack:hover { background: #FFF1E6; border-color: #FFF1E6; }
+.btn--ack { background: #fff; color: #C62828; border-color: #fff; min-height: 42px; padding: 0 24px; font-size: 15.5px; font-weight: 600; }
+.btn--ack:hover { background: #FFECEC; border-color: #FFECEC; }
 
 .sos-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .sos-silenced { font-weight: 500; font-size: 14px; }
@@ -308,7 +309,7 @@ a { color: var(--cyan); }
   grid-template-columns: 300px minmax(0, 1fr) 380px;
 }
 .col { min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
-.col-left { overflow-y: auto; }
+.col-left { overflow-x: hidden; overflow-y: auto; }
 .col-left > .card { flex: none; }
 /* Boats on top, events below; each list scrolls inside its card */
 .col-right > .card { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
@@ -341,11 +342,11 @@ a { color: var(--cyan); }
 .fleet-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 12px; }
 .fleet-mid { font-size: 18px; font-weight: 500; }
 .fleet-mid small { font-size: 12px; font-weight: 400; color: var(--text-2); }
-.fleet-mid--sos { color: var(--orange); }
+.fleet-mid--sos { color: var(--red); }
 
 /* Ticket card (like the reference's upcoming-flight card) */
-.ticket { position: relative; }
-.ticket--sos { border-color: rgba(255, 107, 0, 0.55); background: linear-gradient(160deg, rgba(255, 107, 0, 0.16), rgba(255, 255, 255, 0.02) 60%); }
+.ticket { position: relative; overflow: hidden; }
+.ticket--sos { border-color: rgba(255, 59, 59, 0.55); background: linear-gradient(160deg, rgba(255, 59, 59, 0.16), rgba(255, 255, 255, 0.02) 60%); }
 .ticket--stale { border-style: dashed; border-color: rgba(138, 154, 152, 0.6); }
 .ticket-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ticket-route { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 10px; }
@@ -355,11 +356,11 @@ a { color: var(--cyan); }
 .ticket-end { align-items: flex-end; text-align: right; }
 .ticket-path { flex: 1; display: flex; align-items: center; gap: 5px; padding-bottom: 8px; color: var(--cyan); min-width: 50px; }
 .ticket--live .ticket-path { color: var(--green); }
-.ticket--sos .ticket-path { color: var(--orange); }
+.ticket--sos .ticket-path { color: var(--red); }
 .ticket--stale .ticket-path { color: var(--grey); }
 .ticket-line { flex: 1; border-top: 2px dashed currentColor; opacity: 0.55; }
 .ticket-via { margin-top: 6px; color: var(--text-2); font-size: 13px; text-align: center; }
-.ticket-sos { margin-top: 3px; color: var(--orange-ink); font-size: 13px; font-weight: 500; text-align: center; }
+.ticket-sos { margin-top: 3px; color: var(--red-ink); font-size: 13px; font-weight: 500; text-align: center; }
 
 .ticket-stub {
   position: relative;
@@ -381,8 +382,8 @@ a { color: var(--cyan); }
   background: var(--bg);
   border: 1px solid var(--line);
 }
-.ticket-stub::before { left: -10px; }
-.ticket-stub::after { right: -10px; }
+.ticket-stub::before { left: -9px; }
+.ticket-stub::after { right: -9px; }
 .ticket-stub > div { display: flex; flex-direction: column; gap: 1px; font-size: 13px; min-width: 0; }
 .ticket-btn { margin-top: 12px; width: 100%; }
 
@@ -395,7 +396,7 @@ a { color: var(--cyan); }
   font: 600 11px/1.4 var(--sans);
   letter-spacing: 0.06em;
 }
-.badge--sos { background: var(--orange); color: var(--bg); }
+.badge--sos { background: var(--red); color: var(--bg); }
 .badge--stale { background: transparent; color: var(--grey); border: 1px dashed var(--grey); }
 .badge--live { background: var(--green-soft); color: var(--green); border: 1px solid rgba(73, 220, 122, 0.4); }
 
@@ -413,7 +414,7 @@ a { color: var(--cyan); }
 }
 .boat-card:hover { background: rgba(255, 255, 255, 0.05); }
 .boat-card--stale { border-left: 3px dashed var(--grey); }
-.boat-card--sos { border-color: rgba(255, 107, 0, 0.5); border-left: 3px solid var(--orange); background: var(--orange-soft); }
+.boat-card--sos { border-color: rgba(255, 59, 59, 0.5); border-left: 3px solid var(--red); background: var(--red-soft); }
 
 .boat-card-head {
   width: 100%;
@@ -434,8 +435,8 @@ a { color: var(--cyan); }
 .boat-card-head:hover .boat-card-show { text-decoration: underline; }
 
 .last-known { margin-top: 2px; color: var(--grey); font-weight: 500; font-size: 12.5px; }
-.sos-detail { margin-top: 2px; color: var(--orange-ink); font-weight: 500; font-size: 12.5px; }
-.estimate { margin-top: 4px; padding: 4px 8px; border: 1px dashed var(--orange); border-radius: 8px; background: rgba(4, 10, 10, 0.5); color: var(--orange-ink); font-size: 12px; }
+.sos-detail { margin-top: 2px; color: var(--red-ink); font-weight: 500; font-size: 12.5px; }
+.estimate { margin-top: 4px; padding: 4px 8px; border: 1px dashed var(--red); border-radius: 8px; background: rgba(4, 10, 10, 0.5); color: var(--red-ink); font-size: 12px; }
 
 .facts {
   margin-top: 6px;
@@ -471,9 +472,9 @@ a { color: var(--cyan); }
   border: 1px solid var(--line-2);
   color: var(--text-2);
 }
-.event--sos .event-text { color: var(--orange-ink); font-weight: 500; }
-.event--sos time { color: var(--orange-ink); }
-.event-type--sos { background: var(--orange); border-color: var(--orange); color: var(--bg); }
+.event--sos .event-text { color: var(--red-ink); font-weight: 500; }
+.event--sos time { color: var(--red-ink); }
+.event-type--sos { background: var(--red); border-color: var(--red); color: var(--bg); }
 .event-type--resolved { color: var(--green); border-color: rgba(73, 220, 122, 0.5); background: var(--green-soft); }
 .event--resolved .event-text { color: var(--green); }
 
@@ -500,8 +501,6 @@ a { color: var(--cyan); }
   pointer-events: none;
 }
 .map-chip--title { top: 12px; left: 12px; }
-.map-chip--inline { position: static; color: var(--green); border-color: rgba(73, 220, 122, 0.4); background: var(--green-soft); white-space: nowrap; }
-.app--sos .map-chip--inline { color: var(--orange-ink); border-color: rgba(255, 107, 0, 0.55); background: var(--orange-soft); }
 
 .map-legend {
   position: absolute;
@@ -525,59 +524,12 @@ a { color: var(--cyan); }
 .map-legend li { display: inline-flex; align-items: center; gap: 5px; }
 .key { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .key--live { background: var(--green); }
-.key--sos { background: var(--orange); }
+.key--sos { background: var(--red); }
 .key--stale { border: 2px dashed var(--grey); }
 .key--mesh { width: 16px; height: 0; border-radius: 0; border-top: 2px dashed var(--cyan); }
 
-/* Bottom bar, like the reference's distance-to-arrival bar */
-.map-progress {
-  position: absolute;
-  z-index: 1000;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 14px;
-  border-radius: 16px;
-  background: rgba(4, 10, 10, 0.72);
-  border: 1px solid var(--line-2);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-.map-progress strong { font-size: 19px; font-weight: 500; color: var(--green); }
-.map-progress strong small { font-size: 13px; color: var(--text-2); }
-.ticks {
-  position: relative;
-  flex: 1;
-  height: 18px;
-  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0 2px, transparent 2px 6px);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.ticks span {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: repeating-linear-gradient(90deg, var(--green) 0 2px, transparent 2px 6px);
-  transition: width 0.6s ease;
-}
-.ticks span::after {
-  content: '';
-  position: absolute;
-  right: -6px;
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  margin-top: -6px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 0 4px rgba(73, 220, 122, 0.25);
-}
-
 /* Keep Leaflet's controls clear of the overlays */
 .map-card .leaflet-top.leaflet-left { top: 50px; }
-.map-card .leaflet-bottom { bottom: 66px; }
 
 .leaflet-container { font: inherit; }
 .leaflet-control-attribution { background: rgba(4, 10, 10, 0.7) !important; color: var(--text-3) !important; border-radius: 8px 0 0 8px; font-size: 11px; }
@@ -610,15 +562,15 @@ a { color: var(--cyan); }
   border: 2px solid var(--bg);
   box-shadow: 0 0 0 3px rgba(73, 220, 122, 0.3), 0 0 14px rgba(73, 220, 122, 0.6);
 }
-.bm--sos .bm-dot { inset: 2px; background: var(--orange); box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.35), 0 0 18px rgba(255, 107, 0, 0.8); }
+.bm--sos .bm-dot { inset: 2px; background: var(--red); box-shadow: 0 0 0 3px rgba(255, 59, 59, 0.35), 0 0 18px rgba(255, 59, 59, 0.8); }
 .bm--stale .bm-dot { background: rgba(4, 10, 10, 0.8); border: 2.5px dashed var(--grey); box-shadow: none; }
-.bm--sos.bm--stale .bm-dot { background: rgba(255, 107, 0, 0.2); border: 2.5px dashed var(--orange); }
+.bm--sos.bm--stale .bm-dot { background: rgba(255, 59, 59, 0.2); border: 2.5px dashed var(--red); }
 
 .bm-ring {
   position: absolute;
   inset: -2px;
   border-radius: 50%;
-  border: 3px solid var(--orange);
+  border: 3px solid var(--red);
   animation: ring 1.4s ease-out infinite;
 }
 @keyframes ring {
@@ -647,7 +599,7 @@ a { color: var(--cyan); }
   font-size: 13px;
   font-weight: 500;
 }
-.bm--sos .bm-label strong { border-color: var(--orange); background: var(--orange); color: var(--bg); font-weight: 600; }
+.bm--sos .bm-label strong { border-color: var(--red); background: var(--red); color: var(--bg); font-weight: 600; }
 .bm--stale .bm-label strong { border: 1px dashed var(--grey); }
 .bm-tag {
   padding: 1px 7px;
@@ -658,7 +610,7 @@ a { color: var(--cyan); }
   background: rgba(4, 10, 10, 0.85);
   color: var(--text);
 }
-.bm-tag--sos { background: var(--orange); color: var(--bg); }
+.bm-tag--sos { background: var(--red); color: var(--bg); }
 .bm-tag--stale { border: 1px dashed var(--grey); color: var(--text-2); }
 
 /* Text labels on the map */
@@ -674,7 +626,19 @@ a { color: var(--cyan); }
   white-space: nowrap;
   pointer-events: none;
 }
-.map-text--search span { color: var(--orange-ink); border: 1px dashed var(--orange); transform: translate(calc(-100% - 12px), -50%); }
+.map-text--search span { color: var(--red-ink); border: 1px dashed var(--red); transform: translate(calc(-100% - 12px), -50%); }
+
+/* ---------- Short screens: tighten the left column so it still fits ---------- */
+
+@media (max-height: 800px) and (min-width: 900px) {
+  .fleet-big { font-size: 38px; }
+  .fleet-row { margin-top: 8px; }
+  .pill-btn { min-height: 38px; margin-top: 10px; }
+  .ticket-code { font-size: 26px; }
+  .ticket-stub { margin-top: 8px; padding-top: 8px; }
+  .ticket-btn { margin-top: 8px; }
+  .card { padding: 14px; }
+}
 
 /* ---------- Smaller laptops: narrower side columns, fewer header extras ---------- */
 
@@ -707,7 +671,6 @@ a { color: var(--cyan); }
   .col-map { order: -1; height: 58vh; min-height: 340px; }
   .col-right > .card { flex: none; max-height: 520px; }
   .map-legend { display: none; }
-  .map-progress .map-chip--inline { display: none; }
   .sos-text { font-size: 15px; }
   .sos-banner { max-height: 40vh; padding: 10px 12px; }
 }
@@ -721,5 +684,4 @@ a { color: var(--cyan); }
   .sos-banner { animation: none; }
   .bm-ring { animation: none; transform: scale(1.6); opacity: 0.6; }
   .conn--live .conn-dot, .conn-dot--live { animation: none; }
-  .ticks span { transition: none; }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ACK_CLEAR_MS, API_URL, DEMO } from './config';
 import { useLiveData } from './data/useLiveData';
 import { useNow } from './lib/useNow';
-import { isStale, sortBoats, sosKey } from './lib/boat';
+import { sortBoats, sosKey } from './lib/boat';
 import { Alarm } from './lib/alarm';
 import { formatCoords, triggerLabel } from './lib/format';
 import { StatusBar } from './components/StatusBar';
@@ -147,7 +147,6 @@ export default function App() {
   const focusBoat = picked ?? sosBoats[0] ?? boats[0] ?? null;
   const focusReason = picked ? 'selected' : sosBoats[0] ? 'sos' : 'first';
 
-  const liveCount = boats.filter((b) => !isStale(b, now)).length;
 
   return (
     <div className={`app${sosBoats.length ? ' app--sos' : ''}`}>
@@ -213,16 +212,6 @@ export default function App() {
             <li><span className="key key--stale" /> Last known</li>
             <li><span className="key key--mesh" /> Mesh route</li>
           </ul>
-          <div className="map-progress">
-            <div>
-              <span className="eyebrow">Boats reporting</span>
-              <strong>{liveCount} <small>/ {boats.length}</small></strong>
-            </div>
-            <div className="ticks" aria-hidden="true">
-              <span style={{ width: `${boats.length ? (liveCount / boats.length) * 100 : 0}%` }} />
-            </div>
-            <span className="map-chip map-chip--inline">{sosBoats.length ? `${sosBoats.length} SOS active` : 'All clear'}</span>
-          </div>
         </section>
 
         <div className="col col-right">
