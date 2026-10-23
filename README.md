@@ -9,7 +9,7 @@ This repo holds the hackathon prototype. On a real boat, SeaMesh plugs into the 
 | Folder | Contents |
 |---|---|
 | `esp32_firmware/` | ESP32 + Ra-02 firmware (Arduino). Identical on every boat |
-| `backend/` | Render server: receives uploads from the phones and pushes them to the dashboard (not added yet) |
+| `backend/` | Node.js server on Render: receives uploads from the phones and pushes them to the dashboard |
 
 ## How it works
 
@@ -81,6 +81,41 @@ Service `6e5a0001-5ea3-4e5a-9c1d-2b7f0a4c8e10`
 ### Serial commands (115200 baud)
 
 `sos`, `cancel`, `pos`, `offline` (ignore the phone's internet and relay over LoRa instead), `online`, `status`
+
+## Backend
+
+Node.js 20+, one dependency (`ws`). State is kept in memory, so it resets when the service restarts.
+
+### Deploy on Render
+
+Web service, root directory `backend`, build command `npm install`, start command `npm start`, region Singapore, a paid instance type (free instances sleep after 15 minutes idle and miss the first alert), health check path `/health`.
+
+| Environment variable | Meaning |
+|---|---|
+| `API_KEY` | Secret the phone app sends in the `X-API-Key` header. Uploads are refused if unset |
+| `SOS_HOLD_MIN` | Minutes an SOS stays active after its last SOS packet (default 10) |
+
+### API
+
+| Endpoint | Used by | Purpose |
+|---|---|---|
+| `POST /api/alerts` | phone app | Upload one packet (`X-API-Key` required). Duplicate uploads of the same packet return `{"ok":true,"duplicate":true}` |
+| `GET /api/boats` | dashboard | `{ serverTime, boats, events }` |
+| `WS /live` | dashboard | `{kind:"snapshot"}` on connect, then `{kind:"boat"}` and `{kind:"event"}` updates |
+| `POST /api/reset` | you, between demo runs | Clears all boats and events (`X-API-Key` required) |
+| `GET /health` | Render | Health check |
+
+Each boat in `boats` has `id, lat, lon, status ("normal"/"sos"), trigger, lastSeen, sosSince, acked, hops, via, gateway, rssi, msgId, trail`. A boat that goes silent stays at its last reported position; the dashboard shows it as last known after 60 s without contact.
+
+### Test without phones
+
+```
+cd backend
+npm install
+API_URL=https://<service>.onrender.com API_KEY=<key> npm run simulate
+```
+
+This plays boat A sending positions, raising a water-sensor SOS after 20 s and going silent after 60 s, heard by gateway boat B.
 
 ## Prototype limitations
 
