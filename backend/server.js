@@ -8,6 +8,7 @@
 //   GET  /api/boats    current state: { serverTime, boats, events }
 //   WS   /live        snapshot on connect, then { kind: "boat" | "event" } messages
 //   POST /api/reset    clear all state (X-API-Key), handy between demo runs
+//   POST /api/boats/:id/resolve   shore operator acknowledged the SOS: clear it
 //   GET  /health       for Render's health check
 
 const http = require("http");
@@ -17,6 +18,9 @@ const { WebSocketServer } = require("ws");
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY || "";
 const SOS_HOLD_MS = (Number(process.env.SOS_HOLD_MIN) || 10) * 60 * 1000;
+// A boat repeats its SOS for up to 60 s until its LoRa ACK arrives, so repeats
+// of an SOS the operator already cleared are ignored for this long
+const RESOLVED_REPEAT_MS = 60 * 1000;
 const TRAIL_LEN = 20;
 const MAX_EVENTS = 200;
 const MAX_BODY = 4096;
@@ -54,7 +58,8 @@ function applyPacket(p) {
   boat.trail.push([p.lat, p.lon]);
   if (boat.trail.length > TRAIL_LEN) boat.trail.shift();
 
-  if (p.type === "S") {
+  const repeatOfResolved = boat.resolvedAt && now - boat.resolvedAt < RESOLVED_REPEAT_MS;
+  if (p.type === "S" && !repeatOfResolved) {
     if (boat.status !== "sos") {
       boat.sosSince = now;
       const why = p.trigger === "WATER" ? "water sensor" : "SOS button";
@@ -73,16 +78,20 @@ function applyPacket(p) {
 
 // An SOS stays active until no SOS packet has arrived for SOS_HOLD_MIN minutes,
 // even if the boat goes silent - silence is exactly when rescuers need it.
+function clearSos(boat, reason) {
+  boat.status = "normal";
+  boat.trigger = "-";
+  boat.sosSince = null;
+  boat.acked = false;
+  addEvent("resolved", boat.id, `SOS from ${boat.id} ${reason}`);
+  broadcast({ kind: "boat", boat: publicBoat(boat) });
+}
+
 function expireSos() {
   const now = Date.now();
   for (const boat of boats.values()) {
     if (boat.status === "sos" && now - boat.lastSos > SOS_HOLD_MS) {
-      boat.status = "normal";
-      boat.trigger = "-";
-      boat.sosSince = null;
-      boat.acked = false;
-      addEvent("resolved", boat.id, `SOS from ${boat.id} cleared after ${SOS_HOLD_MS / 60000} min without new SOS packets`);
-      broadcast({ kind: "boat", boat: publicBoat(boat) });
+      clearSos(boat, `cleared after ${SOS_HOLD_MS / 60000} min without new SOS packets`);
     }
   }
   for (const [key, time] of seen) if (now - time > 60 * 60 * 1000) seen.delete(key);
@@ -169,6 +178,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && path === "/api/boats") return send(res, 200, snapshot());
+
+  // Called by the dashboard's Acknowledge button. No API key: the dashboard is a
+  // public static site, so a key there would not be secret anyway.
+  const resolve = path.match(/^\/api\/boats\/([A-Za-z0-9-]{1,8})\/resolve$/);
+  if (req.method === "POST" && resolve) {
+    const boat = boats.get(resolve[1]);
+    if (!boat) return send(res, 404, { error: "unknown boat" });
+    if (boat.status === "sos") {
+      boat.resolvedAt = Date.now();
+      clearSos(boat, "acknowledged by the shore operator and cleared");
+      console.log(`RESOLVED ${boat.id} by operator`);
+    }
+    return send(res, 200, { ok: true });
+  }
 
   if (req.method === "POST" && (path === "/api/alerts" || path === "/api/reset")) {
     if (!API_KEY) return send(res, 503, { error: "server has no API_KEY configured" });

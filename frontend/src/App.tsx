@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEMO } from './config';
+import { ACK_CLEAR_MS, API_URL, DEMO } from './config';
 import { useLiveData } from './data/useLiveData';
 import { useNow } from './lib/useNow';
 import { sortBoats, sosKey } from './lib/boat';
@@ -19,7 +19,13 @@ export default function App() {
   const { boats: boatMap, events, conn, clockOffset, error, restartDemo } = useLiveData();
   const now = useNow(clockOffset);
 
-  const boats = useMemo(() => sortBoats(Object.values(boatMap), now), [boatMap, now]);
+  // SOS incidents the operator acknowledged and cleared. Shown as normal right away,
+  // before the server's update arrives (and in demo mode, where there is no server).
+  const [cleared, setCleared] = useState<Set<string>>(() => new Set());
+  const boats = useMemo(() => sortBoats(
+    Object.values(boatMap).map((b) => (b.status === 'sos' && cleared.has(sosKey(b)) ? { ...b, status: 'normal' as const } : b)),
+    now,
+  ), [boatMap, now, cleared]);
   const sosBoats = useMemo(() => boats.filter((b) => b.status === 'sos'), [boats]); // already newest first
   const sosKeys = sosBoats.map(sosKey);
   const sosKeysJoined = sosKeys.join('|');
@@ -42,10 +48,33 @@ export default function App() {
     setNotifPerm(await perm);
   }, []);
 
+  // Acknowledge silences the alarm now and clears the SOS incidents currently shown
+  // ACK_CLEAR_MS later, unless the operator presses "Keep alert" first.
+  const [clearing, setClearing] = useState<{ targets: { id: string; key: string }[]; at: number } | null>(null);
+  const [clearError, setClearError] = useState<string | null>(null);
+
   const acknowledge = useCallback(() => {
-    // Local only: silences the alarm for the SOS incidents currently shown.
     setSilenced((prev) => new Set([...prev, ...sosKeysJoined.split('|').filter(Boolean)]));
-  }, [sosKeysJoined]);
+    setClearing({ targets: sosBoats.map((b) => ({ id: b.id, key: sosKey(b) })), at: Date.now() + ACK_CLEAR_MS });
+    setClearError(null);
+  }, [sosKeysJoined, sosBoats]);
+
+  const keepAlert = useCallback(() => setClearing(null), []);
+
+  useEffect(() => {
+    if (!clearing || Date.now() < clearing.at) return;
+    const { targets } = clearing;
+    setClearing(null);
+    setCleared((prev) => new Set([...prev, ...targets.map((t) => t.key)]));
+    if (DEMO) return;
+    Promise.all(targets.map(async (t) => {
+      const res = await fetch(`${API_URL}/api/boats/${encodeURIComponent(t.id)}/resolve`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    })).catch((err) => setClearError(`Could not clear the SOS on the server (${err.message}); other dashboards still show it.`));
+    // `now` ticks every second, which is what drives the countdown check
+  }, [clearing, now]);
+
+  const clearingIn = clearing ? Math.max(0, Math.ceil((clearing.at - Date.now()) / 1000)) : null;
 
   useEffect(() => {
     if (soundOn && alarmActive) alarm.current!.start();
@@ -102,7 +131,9 @@ export default function App() {
           now={now}
           alarmActive={alarmActive}
           soundOn={soundOn}
+          clearingIn={clearingIn}
           onAcknowledge={acknowledge}
+          onKeepAlert={keepAlert}
           onEnableAlerts={enableAlerts}
           onShow={showBoat}
         />
@@ -118,6 +149,7 @@ export default function App() {
           onEnableAlerts={enableAlerts}
         />
         {error && <p className="config-error" role="alert">{error}</p>}
+        {clearError && <p className="config-error" role="alert">{clearError}</p>}
       </div>
 
       <main className="main">

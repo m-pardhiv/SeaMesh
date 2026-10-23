@@ -16,6 +16,9 @@ export const STALE_AFTER_MS = 60_000;
 export const DRIFT_KMH = 1.5;
 export const MIN_SEARCH_RADIUS_KM = 0.5;
 
+/** After Acknowledge, the SOS is cleared on the server this long later (unless "Keep alert"). */
+export const ACK_CLEAR_MS = 10_000;
+
 export const MAX_EVENTS = 200;
 export const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 /** Show "Offline" instead of "Reconnecting..." after this many failed attempts in a row. */
