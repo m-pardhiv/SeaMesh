@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { ConnState } from '../types';
 import { formatClock } from '../lib/format';
 
@@ -7,14 +8,6 @@ const CONN_LABEL: Record<ConnState, string> = {
   reconnecting: 'Reconnecting...',
   offline: 'Offline',
 };
-
-/** Sections the header tabs jump to (ids set in App). */
-const SECTIONS = [
-  { id: 'top', label: 'Dashboard' },
-  { id: 'map-card', label: 'Map' },
-  { id: 'boats-card', label: 'Boats' },
-  { id: 'events-card', label: 'Events' },
-];
 
 interface Props {
   conn: ConnState;
@@ -26,12 +19,8 @@ interface Props {
   soundOn: boolean;
   notifications: NotificationPermission | 'unsupported';
   onEnableAlerts: () => void;
-}
-
-function jumpTo(id: string) {
-  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (id === 'top') window.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
-  else document.getElementById(id)?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+  /** shown between the brand and the status pills (the boat search) */
+  children?: ReactNode;
 }
 
 export function StatusBar(p: Props) {
@@ -42,21 +31,15 @@ export function StatusBar(p: Props) {
   return (
     <header className="statusbar">
       <div className="brand">
-        <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
           <path d="M4 13c3-3.4 6.3-3.4 9.3 0s6.3 3.4 9.3 0 4.4-2.3 5.4-2" fill="none" stroke="#49DC7A" strokeWidth="2.6" strokeLinecap="round" />
           <path d="M4 21c3-3.4 6.3-3.4 9.3 0s6.3 3.4 9.3 0 4.4-2.3 5.4-2" fill="none" stroke="#22F2EF" strokeWidth="2.6" strokeLinecap="round" />
         </svg>
-        <span className="brand-name">SeaMesh</span>
+        <h1 className="brand-name">SeaMesh</h1>
         <span className="brand-sub">Shore Dashboard</span>
       </div>
 
-      <nav className="tabs" aria-label="Sections">
-        {SECTIONS.map((s, i) => (
-          <button key={s.id} type="button" className={`tab${i === 0 ? ' tab--active' : ''}`} onClick={() => jumpTo(s.id)}>
-            {s.label}
-          </button>
-        ))}
-      </nav>
+      {p.children}
 
       <div className="stats">
         {p.demo && (
@@ -79,7 +62,7 @@ export function StatusBar(p: Props) {
           title={soundLabel}
           aria-label={soundLabel}
         >
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16Z M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
           </svg>
           {!p.soundOn && <span className="icon-btn-dot" aria-hidden="true" />}

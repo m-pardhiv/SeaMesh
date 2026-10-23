@@ -151,7 +151,7 @@ export default function App() {
 
   return (
     <div className={`app${sosBoats.length ? ' app--sos' : ''}`}>
-      {/* Header and SOS banner stay pinned while the dashboard scrolls */}
+      {/* Header and SOS banner; on desktop the whole dashboard fits the screen below them */}
       <div className="top">
         <StatusBar
           conn={conn}
@@ -163,7 +163,24 @@ export default function App() {
           soundOn={soundOn}
           notifications={notifPerm}
           onEnableAlerts={enableAlerts}
-        />
+        >
+          <label className="search">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+            <span className="sr-only">Search boats by ID</span>
+            <input
+              ref={searchRef}
+              type="search"
+              placeholder="Search boats by ID"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
+            />
+            <kbd aria-hidden="true">/</kbd>
+          </label>
+        </StatusBar>
         <SosBanner
           sosBoats={sosBoats}
           now={now}
@@ -179,35 +196,13 @@ export default function App() {
         {clearError && <p className="config-error" role="alert">{clearError}</p>}
       </div>
 
-      <div className="page-head">
-        <h1>Dashboard</h1>
-        <label className="search">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-          <span className="sr-only">Search boats by ID</span>
-          <input
-            ref={searchRef}
-            type="search"
-            placeholder="Search boats by ID"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
-          />
-          <kbd aria-hidden="true">/</kbd>
-        </label>
-      </div>
-
       <main className="layout">
-        <div className="area-fleet">
+        <div className="col col-left">
           <FleetCard boats={boats} now={now} soundOn={soundOn} notifications={notifPerm} onEnableAlerts={enableAlerts} />
-        </div>
-        <div className="area-focus">
           <FocusCard boat={focusBoat} now={now} reason={focusReason} onShow={showBoat} />
         </div>
 
-        <section className="card map-card area-map" id="map-card" aria-label="Map" ref={mapRef}>
+        <section className="card map-card col-map" id="map-card" aria-label="Map" ref={mapRef}>
           <BoatMap boats={boats} now={now} focus={focus} />
           <div className="map-chip map-chip--title" aria-hidden="true">
             <span className={`conn-dot conn-dot--${conn}`} /> Live map · {boats.length} boat{boats.length === 1 ? '' : 's'}
@@ -230,10 +225,8 @@ export default function App() {
           </div>
         </section>
 
-        <div className="area-boats">
+        <div className="col col-right">
           <BoatList boats={listed} now={now} onShow={showBoat} total={boats.length} query={query.trim()} />
-        </div>
-        <div className="area-events">
           <EventLog events={events} />
         </div>
       </main>
