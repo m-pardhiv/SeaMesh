@@ -1,29 +1,30 @@
 // SeaMesh mesh node - ESP32 + Ra-02 (SX1278, 433 MHz)
 //
-// The same firmware runs on every boat. Only the settings block changes.
-//  - Boat WITHOUT signal: broadcasts its own position/SOS and relays others.
-//  - Boat WITH signal (joined to the phone hotspot = "cellular"): uploads
-//    every packet it hears to the dashboard and ACKs SOS messages.
-//    The React dashboard reads it as JSON from http://<gateway IP>/data
+// Identical firmware for every boat - nothing to edit per board.
+//  - Boat ID comes from the chip's MAC address (e.g. "3F2A"); BLE name "SeaMesh-3F2A".
+//  - The boat's GPS + internet link is a phone running the SeaMesh app over BLE
+//    (demo stand-in for the boat's existing GPS/GPRS tracker).
+//  - Phone offline (or not connected): broadcast own position/SOS over LoRa and
+//    relay packets from other boats.
+//  - Phone online: hand every packet heard to the phone for upload; once the phone
+//    confirms the upload, send a LoRa ACK back to the boat that raised the SOS.
 //
-// Packet (text, ~45 bytes):
-//   type,origin,msgId,lat,lon,time,hop,trigger,via
+// LoRa packet (text):  type,origin,msgId,lat,lon,time,hop,trigger,via
 //   type: P = position, S = SOS, A = ack     via = last boat that transmitted it
+//   time: unix time of the GPS fix (0 = no phone fix, simulated position)
+//
+// BLE service 6e5a0001-5ea3-4e5a-9c1d-2b7f0a4c8e10
+//   GPS      ...0002 WRITE   "lat,lon,accuracy_m,fix_unix_time"
+//   CONTROL  ...0003 WRITE   "NET,1" / "NET,0" / "ACK,<origin>,<msgId>"
+//   PACKETS  ...0004 NOTIFY  "type,origin,msgId,lat,lon,time,hop,trigger,via,gateway,rssi"
 //
 // Serial commands (115200): sos, cancel, pos, offline, online, status
 
 #include <SPI.h>
 #include <LoRa.h>
-#include <WiFi.h>
-#include <WebServer.h>
-
-// ================= Per-boat settings =================
-#define BOAT_ID   "A"          // A, B, C ... (letters/numbers only)
-#define WIFI_SSID ""           // phone hotspot = this boat's "cellular". "" = no signal
-#define WIFI_PASS ""
-#define BASE_LAT  0            // simulated GPS start position; 0 = pick a sea
-#define BASE_LON  0            // position off Kochi from BOAT_ID (see initPosition)
-// =====================================================
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
 
 // Radio - minimum power, because there is no antenna
 #define FREQ      433E6
@@ -51,11 +52,16 @@
 #define SOS_INTERVAL    4000   // SOS repeat
 #define SOS_MAX_REPEATS 15
 
+#define SERVICE_UUID "6e5a0001-5ea3-4e5a-9c1d-2b7f0a4c8e10"
+#define GPS_UUID     "6e5a0002-5ea3-4e5a-9c1d-2b7f0a4c8e10"
+#define CONTROL_UUID "6e5a0003-5ea3-4e5a-9c1d-2b7f0a4c8e10"
+#define PACKETS_UUID "6e5a0004-5ea3-4e5a-9c1d-2b7f0a4c8e10"
+
 struct Packet {
   char type;
   String origin;
   uint16_t msgId;
-  float lat, lon;
+  double lat, lon;
   uint32_t t;
   uint8_t hop;
   String trig;
@@ -63,11 +69,18 @@ struct Packet {
 };
 
 // ---------- state ----------
+String boatId;                 // from the chip MAC, e.g. "3F2A"
 uint16_t nextMsgId = 1;
-float curLat, curLon;
+
+double simLat, simLon;         // fallback position when the phone has no GPS fix
+double fixLat = 0, fixLon = 0;
+uint32_t fixTime = 0;          // unix time of the phone's last fix, 0 = none
+unsigned long fixReceivedAt = 0;
+
+bool bleConnected = false;
+bool phoneOnline = false;      // the phone reported working internet
+bool forceOffline = false;     // serial "offline" command, for the demo
 unsigned long lastPos = 0;
-bool forceOffline = false;
-bool serverStarted = false;
 
 bool sosActive = false;
 String sosTrig = "";
@@ -82,26 +95,20 @@ bool lastBtn = HIGH;
 String seen[SEEN_SIZE];
 int seenPos = 0;
 
-// relay queue
+// LoRa relay queue
 #define QUEUE_SIZE 6
 struct Queued { bool used; Packet p; unsigned long due; };
 Queued queue[QUEUE_SIZE];
 
-// dashboard (only used when this boat is online)
-#define TRAIL_LEN 10
-struct BoatInfo {
-  String id; float lat, lon; char type; int hops; String via;
-  uint16_t msgId; unsigned long seenAt; int rssi; String trig;
-  float trailLat[TRAIL_LEN], trailLon[TRAIL_LEN]; int trailCount;
-};
-#define MAX_BOATS 8
-BoatInfo boats[MAX_BOATS];
-int boatCount = 0;
-#define MAX_EVENTS 12
-String events[MAX_EVENTS];
-int eventCount = 0;
+// SOS packets handed to the phone, waiting for its upload confirmation
+#define PENDING_SIZE 8
+Packet pending[PENDING_SIZE];
+bool pendingUsed[PENDING_SIZE];
 
-WebServer server(80);
+// BLE writes arrive on the Bluetooth task; they are queued and handled in loop()
+#define BLE_MSG_LEN 72
+QueueHandle_t bleInbox;
+BLECharacteristic* packetsChar;
 
 // ---------- helpers ----------
 void blink() {
@@ -111,10 +118,8 @@ void blink() {
 }
 
 bool online() {
-  return strlen(WIFI_SSID) > 0 && !forceOffline && WiFi.status() == WL_CONNECTED;
+  return bleConnected && phoneOnline && !forceOffline;
 }
-
-uint32_t uptimeSec() { return millis() / 1000; }
 
 bool isSafeField(const String& s) {
   if (s.length() == 0 || s.length() > 8) return false;
@@ -126,27 +131,32 @@ bool isSafeField(const String& s) {
 
 String encode(const Packet& p) {
   return String(p.type) + "," + p.origin + "," + String(p.msgId) + "," +
-         String(p.lat, 5) + "," + String(p.lon, 5) + "," + String(p.t) + "," +
+         String(p.lat, 6) + "," + String(p.lon, 6) + "," + String(p.t) + "," +
          String(p.hop) + "," + p.trig + "," + p.via;
 }
 
-bool decode(const String& s, Packet& p) {
-  String f[9];
+// Split s on commas into at most n fields; returns the number of fields found
+int splitFields(const String& s, String* f, int n) {
   int idx = 0, start = 0;
-  for (unsigned int i = 0; i <= s.length() && idx < 9; i++) {
+  for (unsigned int i = 0; i <= s.length() && idx < n; i++) {
     if (i == s.length() || s[i] == ',') {
       f[idx++] = s.substring(start, i);
       start = i + 1;
     }
   }
-  if (idx != 9 || f[0].length() != 1) return false;
+  return idx;
+}
+
+bool decode(const String& s, Packet& p) {
+  String f[9];
+  if (splitFields(s, f, 9) != 9 || f[0].length() != 1) return false;
   p.type = f[0][0];
   if (p.type != 'P' && p.type != 'S' && p.type != 'A') return false;
   if (!isSafeField(f[1]) || !isSafeField(f[7]) || !isSafeField(f[8])) return false;
   p.origin = f[1];
   p.msgId = f[2].toInt();
-  p.lat = f[3].toFloat();
-  p.lon = f[4].toFloat();
+  p.lat = f[3].toDouble();
+  p.lon = f[4].toDouble();
   p.t = f[5].toInt();
   p.hop = f[6].toInt();
   p.trig = f[7];
@@ -168,17 +178,6 @@ void remember(const String& key) {
   seenPos = (seenPos + 1) % SEEN_SIZE;
 }
 
-void addEvent(const String& e) {
-  String line = String(uptimeSec()) + "s  " + e;
-  Serial.println("EVENT " + line);
-  if (eventCount < MAX_EVENTS) {
-    events[eventCount++] = line;
-  } else {
-    for (int i = 1; i < MAX_EVENTS; i++) events[i - 1] = events[i];
-    events[MAX_EVENTS - 1] = line;
-  }
-}
-
 // ---------- radio ----------
 byte readChipVersion() {
   pinMode(PIN_RST, OUTPUT);
@@ -198,7 +197,7 @@ byte readChipVersion() {
 }
 
 void transmit(Packet p) {
-  p.via = BOAT_ID;
+  p.via = boatId;
   String s = encode(p);
   LoRa.beginPacket();
   LoRa.print(s);
@@ -232,118 +231,148 @@ void processQueue() {
   }
 }
 
-// ---------- dashboard ----------
-// The dashboard keeps the last packet heard from every boat, so a boat that
-// goes silent stays on the map at its last known position.
-void upload(const Packet& p, int rssi) {
-  int i = 0;
-  while (i < boatCount && boats[i].id != p.origin) i++;
-  if (i == boatCount) {
-    if (boatCount == MAX_BOATS) return;
-    boats[i] = BoatInfo();
-    boats[i].id = p.origin;
-    boats[i].type = 'P';
-    boatCount++;
+// ---------- phone link (BLE) ----------
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override { bleConnected = true; }
+  void onDisconnect(BLEServer*) override {
+    bleConnected = false;
+    phoneOnline = false;
+    BLEDevice::startAdvertising();
   }
-  BoatInfo& b = boats[i];
+};
 
-  // an SOS stays on the map as SOS until that boat's SOS is over
-  bool sosSticky = p.type == 'P' && b.type == 'S' && millis() - b.seenAt < 60000;
-  b.type = sosSticky ? 'S' : p.type;
-  if (!sosSticky) b.trig = p.trig;
-  b.lat = p.lat;
-  b.lon = p.lon;
-  b.hops = p.hop;
-  b.via = p.via;
-  b.msgId = p.msgId;
-  b.seenAt = millis();
-  b.rssi = rssi;
-
-  if (b.trailCount == TRAIL_LEN) {
-    for (int k = 1; k < TRAIL_LEN; k++) {
-      b.trailLat[k - 1] = b.trailLat[k];
-      b.trailLon[k - 1] = b.trailLon[k];
-    }
-    b.trailCount--;
+// tag 'G' = GPS write, 'C' = CONTROL write
+class WriteCallbacks : public BLECharacteristicCallbacks {
+  char tag;
+ public:
+  WriteCallbacks(char t) : tag(t) {}
+  void onWrite(BLECharacteristic* c) override {
+    char msg[BLE_MSG_LEN];
+    String v = c->getValue();
+    msg[0] = tag;
+    strncpy(msg + 1, v.c_str(), BLE_MSG_LEN - 2);
+    msg[BLE_MSG_LEN - 1] = '\0';
+    xQueueSend(bleInbox, msg, 0);
   }
-  b.trailLat[b.trailCount] = p.lat;
-  b.trailLon[b.trailCount] = p.lon;
-  b.trailCount++;
+};
 
-  String how = (p.origin == BOAT_ID) ? "own position"
-             : (p.hop == 0 ? "direct" : String(p.hop) + " relay hop(s), last via " + p.via);
-  addEvent(String(p.type == 'S' ? "SOS" : "Position") + " from boat " + p.origin +
-           " (" + how + ")" + (rssi != 0 ? ", RSSI " + String(rssi) : ""));
+void setupBle() {
+  bleInbox = xQueueCreate(10, BLE_MSG_LEN);
+  BLEDevice::init(("SeaMesh-" + boatId).c_str());
+  BLEDevice::setMTU(185);
+  BLEServer* server = BLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
+  BLEService* service = server->createService(SERVICE_UUID);
+
+  service->createCharacteristic(GPS_UUID, BLECharacteristic::PROPERTY_WRITE)
+         ->setCallbacks(new WriteCallbacks('G'));
+  service->createCharacteristic(CONTROL_UUID, BLECharacteristic::PROPERTY_WRITE)
+         ->setCallbacks(new WriteCallbacks('C'));
+  packetsChar = service->createCharacteristic(PACKETS_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  packetsChar->addDescriptor(new BLE2902());
+
+  service->start();
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  adv->addServiceUUID(SERVICE_UUID);
+  adv->setScanResponse(true);
+  BLEDevice::startAdvertising();
 }
 
-#define STALE_SEC 60   // no contact for this long = shown as "last known"
+// Hand a packet to the phone for upload
+void notifyPhone(const Packet& p, int rssi) {
+  String s = encode(p) + "," + boatId + "," + String(rssi);
+  packetsChar->setValue((uint8_t*)s.c_str(), s.length());
+  packetsChar->notify();
+  Serial.println("UP    " + s);
 
-// JSON API for the React dashboard (CORS open so it can run on any origin)
-void handleData() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Cache-Control", "no-store");
-  String j = "{\"gw\":\"" BOAT_ID "\",\"online\":" + String(online() ? "true" : "false") +
-             ",\"uptime\":" + String(uptimeSec()) + ",\"boats\":[";
-  for (int i = 0; i < boatCount; i++) {
-    BoatInfo& b = boats[i];
-    unsigned long age = (millis() - b.seenAt) / 1000;
-    if (i) j += ",";
-    j += "{\"id\":\"" + b.id + "\",\"lat\":" + String(b.lat, 5) + ",\"lon\":" + String(b.lon, 5) +
-         ",\"type\":\"" + String(b.type) + "\",\"hops\":" + String(b.hops) + ",\"via\":\"" + b.via +
-         "\",\"msg\":" + String(b.msgId) + ",\"age\":" + String(age) +
-         ",\"stale\":" + String(age > STALE_SEC ? "true" : "false") +
-         ",\"rssi\":" + String(b.rssi) + ",\"trig\":\"" + b.trig + "\",\"trail\":[";
-    for (int k = 0; k < b.trailCount; k++) {
-      if (k) j += ",";
-      j += "[" + String(b.trailLat[k], 5) + "," + String(b.trailLon[k], 5) + "]";
+  if (p.type == 'S') {
+    for (int i = 0; i < PENDING_SIZE; i++) {
+      if (!pendingUsed[i]) { pending[i] = p; pendingUsed[i] = true; return; }
     }
-    j += "]}";
+    pendingUsed[0] = true;   // full: overwrite the oldest slot
+    pending[0] = p;
   }
-  j += "],\"events\":[";
-  for (int i = 0; i < eventCount; i++) {
-    if (i) j += ",";
-    j += "\"" + events[i] + "\"";
+}
+
+void cancelSos(const String& why);
+
+// The phone uploaded origin:msgId - for an SOS, tell that boat over LoRa
+void onUploadAck(const String& origin, uint16_t msgId) {
+  if (origin == boatId) {
+    if (sosActive) cancelSos("uploaded by our own phone - SOS delivered!");
+    return;
   }
-  j += "]}";
-  server.send(200, "application/json", j);
+  for (int i = 0; i < PENDING_SIZE; i++) {
+    if (pendingUsed[i] && pending[i].origin == origin && pending[i].msgId == msgId) {
+      pendingUsed[i] = false;
+      Packet ack = pending[i];
+      ack.type = 'A';
+      ack.hop = 0;
+      ack.trig = "ACK";
+      remember(keyOf(ack));
+      enqueue(ack);
+      Serial.println("ACK   " + origin + ":" + String(msgId) + " uploaded - sending LoRa ACK");
+      return;
+    }
+  }
+}
+
+void handleBleInbox() {
+  char msg[BLE_MSG_LEN];
+  while (xQueueReceive(bleInbox, msg, 0) == pdTRUE) {
+    String body = String(msg + 1);
+    body.trim();
+    String f[4];
+    int n = splitFields(body, f, 4);
+
+    if (msg[0] == 'G' && n == 4) {
+      double lat = f[0].toDouble(), lon = f[1].toDouble();
+      if (lat == 0 && lon == 0) continue;
+      fixLat = lat;
+      fixLon = lon;
+      fixTime = f[3].toInt();
+      fixReceivedAt = millis();
+    } else if (msg[0] == 'C' && n == 2 && f[0] == "NET") {
+      bool now = f[1] == "1";
+      if (now != phoneOnline) {
+        phoneOnline = now;
+        Serial.println(String("PHONE ") + (now ? "online - this boat forwards to the internet"
+                                               : "offline - relaying over LoRa"));
+      }
+    } else if (msg[0] == 'C' && n == 3 && f[0] == "ACK") {
+      onUploadAck(f[1], f[2].toInt());
+    }
+  }
 }
 
 // ---------- own messages ----------
-// Simulated GPS: every boat starts out at sea off Kochi, inside or outside
-// the ~20 km cellular coverage around Kochi.
-void initPosition() {
-  if (BASE_LAT != 0) { curLat = BASE_LAT; curLon = BASE_LON; return; }
-  switch (BOAT_ID[0]) {
-    case 'A': curLat = 9.9500; curLon = 75.9500; break;   // ~32 km out, no signal
-    case 'B': curLat = 9.9800; curLon = 76.1400; break;   // ~12 km out, in coverage
-    case 'C': curLat = 9.9650; curLon = 76.0400; break;   // ~24 km out, between them
-    default:  curLat = 9.9200 + random(0, 600) / 10000.0;
-              curLon = 75.9800 + random(0, 1000) / 10000.0; break;
-  }
+// Fallback position at sea off Kochi, different for each chip, used until the
+// phone sends a GPS fix
+void initSimPosition() {
+  uint32_t h = (uint32_t)ESP.getEfuseMac();
+  simLat = 9.9300 + (h % 600) / 10000.0;          // 9.93 - 9.99
+  simLon = 75.9500 + ((h >> 10) % 2000) / 10000.0; // 75.95 - 76.15
 }
 
 Packet makeOwn(char type, const String& trig) {
   Packet p;
   p.type = type;
-  p.origin = BOAT_ID;
+  p.origin = boatId;
   p.msgId = nextMsgId++;
-  p.lat = curLat;
-  p.lon = curLon;
-  p.t = uptimeSec();
+  bool haveFix = fixReceivedAt != 0;
+  p.lat = haveFix ? fixLat : simLat;
+  p.lon = haveFix ? fixLon : simLon;
+  p.t = haveFix ? fixTime : 0;
   p.hop = 0;
   p.trig = trig;
-  p.via = BOAT_ID;
+  p.via = boatId;
   return p;
 }
 
 void sendOwn(const Packet& p) {
   remember(keyOf(p));
-  if (online()) {
-    upload(p, 0);          // we have signal ourselves - straight to the dashboard
-    if (p.type == 'S') sosActive = false;
-  } else {
-    transmit(p);
-  }
+  if (online()) notifyPhone(p, 0);   // our own phone has internet - upload directly
+  else transmit(p);
 }
 
 // Each repeat is a new message id, so a repeat that follows a lost packet
@@ -372,7 +401,7 @@ void cancelSos(const String& why) {
   Serial.println("SOS   stopped: " + why);
 }
 
-// ---------- incoming ----------
+// ---------- incoming LoRa ----------
 void onPacket(Packet p, int rssi) {
   String key = keyOf(p);
   if (alreadySeen(key)) {
@@ -383,22 +412,14 @@ void onPacket(Packet p, int rssi) {
   Serial.println("RX    " + encode(p) + "  RSSI " + String(rssi));
 
   // ACK for one of our own SOS messages
-  if (p.type == 'A' && p.origin == BOAT_ID) {
+  if (p.type == 'A' && p.origin == boatId) {
     if (sosActive) cancelSos("ACK from shore via boat " + p.via + " - SOS delivered!");
     return;
   }
-  if (p.origin == BOAT_ID) return;   // our own packet echoed back by a relay
+  if (p.origin == boatId) return;   // our own packet echoed back by a relay
 
   if (online() && p.type != 'A') {
-    upload(p, rssi);
-    if (p.type == 'S') {
-      Packet ack = p;
-      ack.type = 'A';
-      ack.hop = 0;
-      ack.trig = "ACK";
-      remember(keyOf(ack));
-      enqueue(ack);
-    }
+    notifyPhone(p, rssi);
     return;
   }
 
@@ -412,6 +433,15 @@ void onPacket(Packet p, int rssi) {
 }
 
 // ---------- inputs ----------
+void printStatus() {
+  String gps = fixReceivedAt ? String(fixLat, 6) + ", " + String(fixLon, 6) +
+                               " (" + String((millis() - fixReceivedAt) / 1000) + " s ago)"
+                             : "no phone fix - simulated " + String(simLat, 6) + ", " + String(simLon, 6);
+  Serial.println("STAT  boat " + boatId + " | phone " + String(bleConnected ? "connected" : "not connected") +
+                 " | " + String(online() ? "ONLINE (gateway)" : "OFFLINE (relay)") +
+                 " | SOS " + String(sosActive ? "active" : "off") + " | GPS " + gps);
+}
+
 void checkInputs() {
   bool btn = digitalRead(PIN_SOS_BTN);
   if (btn == LOW && lastBtn == HIGH) {
@@ -433,13 +463,9 @@ void checkInputs() {
     if (cmd == "sos") triggerSos("BTN");
     else if (cmd == "cancel") cancelSos("cancelled by user");
     else if (cmd == "pos") sendOwn(makeOwn('P', "-"));
-    else if (cmd == "offline") { forceOffline = true; Serial.println("MODE  forced offline (no cellular)"); }
+    else if (cmd == "offline") { forceOffline = true; Serial.println("MODE  forced offline (no internet)"); }
     else if (cmd == "online") { forceOffline = false; Serial.println("MODE  online allowed"); }
-    else if (cmd == "status") {
-      Serial.println("STAT  boat " BOAT_ID ", " + String(online() ? "ONLINE (gateway)" : "OFFLINE (relay)") +
-                     ", SOS " + String(sosActive ? "active" : "off") +
-                     (WiFi.status() == WL_CONNECTED ? ", IP " + WiFi.localIP().toString() : ""));
-    }
+    else if (cmd == "status") printStatus();
   }
 }
 
@@ -450,10 +476,15 @@ void setup() {
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
   pinMode(PIN_WATER, INPUT_PULLUP);
   randomSeed(esp_random());
-  initPosition();
+
+  char id[5];
+  uint64_t mac = ESP.getEfuseMac();   // bytes are stored LSB first
+  snprintf(id, sizeof(id), "%02X%02X", (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+  boatId = id;
+  initSimPosition();
 
   Serial.println();
-  Serial.println("=== SeaMesh node " BOAT_ID " ===");
+  Serial.println("=== SeaMesh node " + boatId + " ===");
 
   SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, PIN_SS);
   byte v = readChipVersion();
@@ -471,37 +502,16 @@ void setup() {
   LoRa.setSyncWord(SYNC_WORD);
   LoRa.enableCrc();
   Serial.println("[OK] LoRa 433 MHz, TX power " + String(TX_POWER) + " dBm (no antenna mode)");
-
   Serial.println("[OK] Sensors optional: SOS button D27, water D33 (nothing wired = no alert)");
 
-  if (strlen(WIFI_SSID) > 0) {
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    Serial.println("[..] Joining hotspot '" WIFI_SSID "' (this boat's cellular link)");
-  } else {
-    WiFi.mode(WIFI_OFF);
-    Serial.println("[--] No hotspot set - this boat has no signal, will relay over LoRa");
-  }
-
-  server.on("/", []() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json", "{\"service\":\"SeaMesh gateway\",\"boat\":\"" BOAT_ID "\",\"data\":\"/data\"}");
-  });
-  server.on("/data", handleData);
+  setupBle();
+  Serial.println("[OK] Bluetooth: open the SeaMesh app and pick 'SeaMesh-" + boatId + "'");
   Serial.println("Commands: sos, cancel, pos, offline, online, status");
   Serial.println("--------------------------");
 }
 
 void loop() {
-  // start the dashboard once the hotspot connection is up
-  if (!serverStarted && WiFi.status() == WL_CONNECTED) {
-    server.begin();
-    serverStarted = true;
-    Serial.println("[OK] Online - dashboard data at http://" + WiFi.localIP().toString() + "/data");
-    addEvent("Gateway boat " BOAT_ID " online");
-  }
-  if (serverStarted) server.handleClient();
+  handleBleInbox();
 
   int size = LoRa.parsePacket();
   if (size) {
@@ -523,8 +533,10 @@ void loop() {
 
   if (!sosActive && millis() - lastPos > POS_INTERVAL) {
     lastPos = millis();
-    curLat += random(-20, 21) / 100000.0;   // simulated drift
-    curLon += random(-20, 21) / 100000.0;
+    if (fixReceivedAt == 0) {               // no phone GPS yet - drift the simulated position
+      simLat += random(-20, 21) / 100000.0;
+      simLon += random(-20, 21) / 100000.0;
+    }
     sendOwn(makeOwn('P', "-"));
   }
 }
