@@ -199,6 +199,7 @@ export default function App() {
         <div className="col col-left">
           <FleetCard boats={boats} now={now} soundOn={soundOn} notifications={notifPerm} onEnableAlerts={enableAlerts} />
           <FocusCard boat={focusBoat} now={now} reason={focusReason} onShow={showBoat} />
+          <EventLog events={events} />
         </div>
 
         <section className="card map-card col-map" id="map-card" aria-label="Map" ref={mapRef}>
@@ -216,7 +217,6 @@ export default function App() {
 
         <div className="col col-right">
           <BoatList boats={listed} now={now} onShow={showBoat} total={boats.length} query={query.trim()} />
-          <EventLog events={events} />
         </div>
       </main>
 

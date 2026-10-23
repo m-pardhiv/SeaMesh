@@ -311,9 +311,15 @@ a { color: var(--cyan); }
 .col { min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
 .col-left { overflow-x: hidden; overflow-y: auto; }
 .col-left > .card { flex: none; }
+/* The event log takes whatever height is left under the boat ticket and scrolls inside */
+.col-left > .events-card { flex: 1 1 0; min-height: 96px; display: flex; flex-direction: column; padding: 12px 14px; }
+.events-card .panel-head { margin-bottom: 6px; }
+.events-card .panel-head h2 { font-size: 15px; }
+.events-card .panel-head .muted { display: none; }
+.events-card .event { padding: 5px 0; font-size: 12px; gap: 7px; }
+.events-card .event-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Boats on top, events below; each list scrolls inside its card */
 .col-right > .card { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.col-right > .card:first-child { flex-grow: 1.15; }
 .col-map { min-height: 0; }
 
 /* ---------- Cards ---------- */
@@ -670,6 +676,8 @@ a { color: var(--cyan); }
   .col-left { overflow: visible; }
   .col-map { order: -1; height: 58vh; min-height: 340px; }
   .col-right > .card { flex: none; max-height: 520px; }
+  .col-left > .events-card { flex: none; max-height: 340px; }
+  .events-card .event-text { white-space: normal; }
   .map-legend { display: none; }
   .sos-text { font-size: 15px; }
   .sos-banner { max-height: 40vh; padding: 10px 12px; }
