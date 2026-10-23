@@ -1,0 +1,6 @@
+{
+  "name": "SeaMesh",
+  "description": "Maritime LoRa mesh BLE bridge and GPS internet gateway for fishing boats",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
