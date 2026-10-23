@@ -10,6 +10,9 @@ This repo holds the hackathon prototype. On a real boat, SeaMesh plugs into the 
 |---|---|
 | `esp32_firmware/` | ESP32 + Ra-02 firmware (Arduino). Identical on every boat |
 | `backend/` | Node.js server on Render: receives uploads from the phones and pushes them to the dashboard |
+| `seamesh mobile connection/` | Android app (demo stand-in for the boat's GPS/GPRS unit). Same app on every phone |
+
+`.github/workflows/build-apk.yml` builds the app on GitHub on every push that changes it. The latest APK is at **Releases → apk-latest** (`SeaMesh.apk`), or under the run's artifacts in the Actions tab.
 
 ## How it works
 
