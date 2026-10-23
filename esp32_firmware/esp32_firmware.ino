@@ -31,11 +31,16 @@
 // reconnects on its own), instead of the node silently freezing
 #define LOOP_WDT_MS 8000
 
-// Radio - minimum power, because there is no antenna
+// Radio. 10 dBm = the 10 mW license-free limit for 433 MHz in India. Without
+// antennas, 2 dBm did not reach the other board even at 30 cm; keep transmissions
+// short until antennas are fitted (reflected power stresses the PA, not heat).
 #define FREQ      433E6
-#define TX_POWER  2
+#define TX_POWER  10         // default dBm; change at runtime with "power N" (2-17)
 #define SYNC_WORD 0x5E
+#define SPREADING_FACTOR 9   // SF9: ~6 dB more sensitive than SF7, 51-byte packet ~0.37 s
 #define MAX_HOPS  4
+
+int txPower = TX_POWER;
 
 // Ra-02 -> ESP32 wiring
 #define PIN_SS   5
@@ -135,6 +140,33 @@ bool isSafeField(const String& s) {
   return true;
 }
 
+// LoRa's own CRC only covers the air link. Packets were seen corrupted while
+// being read out of the radio over SPI ("B908" arriving as "B9r8"), so every
+// packet on the air also carries "*XX", a CRC-8 of the text, checked after the
+// read. The phone and backend never see it.
+uint8_t crc8(const String& s) {
+  uint8_t c = 0;
+  for (unsigned int i = 0; i < s.length(); i++) {
+    c ^= (uint8_t)s[i];
+    for (int b = 0; b < 8; b++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x07) : (uint8_t)(c << 1);
+  }
+  return c;
+}
+
+String withChecksum(const String& s) {
+  char hex[3];
+  snprintf(hex, sizeof(hex), "%02X", crc8(s));
+  return s + "*" + hex;
+}
+
+// Returns the packet text without "*XX", or "" if the checksum is missing or wrong
+String checkChecksum(const String& raw) {
+  int star = raw.lastIndexOf('*');
+  if (star < 0 || raw.length() - star != 3) return "";
+  String body = raw.substring(0, star);
+  return withChecksum(body) == raw ? body : "";
+}
+
 String encode(const Packet& p) {
   return String(p.type) + "," + p.origin + "," + String(p.msgId) + "," +
          String(p.lat, 6) + "," + String(p.lon, 6) + "," + String(p.t) + "," +
@@ -226,8 +258,9 @@ bool startRadio() {
   LoRa.setPins(PIN_SS, PIN_RST, PIN_DIO0);
   LoRa.setSPIFrequency(1E6);   // 1 MHz instead of 8: more tolerant of long jumper wires
   if (!LoRa.begin(FREQ)) return false;
-  LoRa.setTxPower(TX_POWER);
+  LoRa.setTxPower(txPower);
   LoRa.setSyncWord(SYNC_WORD);
+  LoRa.setSpreadingFactor(SPREADING_FACTOR);
   LoRa.enableCrc();
   return true;
 }
@@ -248,8 +281,8 @@ int radioFixes = 0;
 
 bool radioConfigOk() {
   return readRadioReg(0x1D) == 0x72 &&       // BW 125 kHz, CR 4/5, explicit header
-         readRadioReg(0x1E) == 0x74 &&       // SF7, CRC on
-         readRadioReg(0x09) == (0x80 | (TX_POWER - 2)) &&   // PA_BOOST at TX_POWER
+         readRadioReg(0x1E) == ((SPREADING_FACTOR << 4) | 0x04) &&   // SF, CRC on
+         readRadioReg(0x09) == (0x80 | (txPower - 2)) &&    // PA_BOOST at txPower
          readRadioReg(0x39) == SYNC_WORD;
 }
 
@@ -291,7 +324,7 @@ void transmit(Packet p) {
   }
   ensureRadioConfig();
   LoRa.beginPacket();
-  LoRa.print(s);
+  LoRa.print(withChecksum(s));
   writeRadioReg(REG_DIO_MAPPING_1, DIO0_TX_DONE);
   LoRa.endPacket(true);
 
@@ -574,7 +607,40 @@ void txTest(bool rfo) {
                                         : "NO TX done within " + String(TX_TIMEOUT_MS) + " ms") +
                  " | corrupted SPI reads during TX: " + String(corrupted) + "/" + String(reads));
   writeRadioReg(REG_IRQ_FLAGS, 0xFF);
-  if (rfo) LoRa.setTxPower(TX_POWER);   // back to PA_BOOST
+  if (rfo) LoRa.setTxPower(txPower);   // back to PA_BOOST
+}
+
+// Diagnostic for a link that receives nothing: listen continuously for `ms` and
+// report the strongest signal seen and every header / packet / CRC error, which
+// LoRa.parsePacket() would otherwise drop silently.
+void rxTest(unsigned long ms) {
+  if (!radioOk) { Serial.println("TEST  no Ra-02"); return; }
+  writeRadioReg(REG_IRQ_FLAGS, 0xFF);
+  writeRadioReg(REG_OP_MODE, 0x85);          // LoRa RX continuous
+  int maxRssi = -200, minRssi = 0, headers = 0, packets = 0, crcErrors = 0;
+  long sum = 0, samples = 0;
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    int rssi = (int)readRadioReg(0x1B) - 164; // current RSSI, 433 MHz (LF) port
+    if (rssi > maxRssi) maxRssi = rssi;
+    if (rssi < minRssi) minRssi = rssi;
+    sum += rssi;
+    samples++;
+    byte irq = readRadioReg(REG_IRQ_FLAGS);
+    if (irq) {
+      if (irq & 0x10) headers++;
+      if (irq & 0x40) packets++;
+      if (irq & 0x20) crcErrors++;
+      writeRadioReg(REG_IRQ_FLAGS, 0xFF);
+    }
+    esp_task_wdt_reset();
+    delay(2);
+  }
+  writeRadioReg(REG_OP_MODE, 0x81);          // standby; parsePacket() re-arms RX
+  Serial.println("TEST  listened " + String(ms / 1000) + " s | RSSI min " + String(minRssi) +
+                 " avg " + String(samples ? sum / samples : 0) + " max " + String(maxRssi) + " dBm" +
+                 " | headers " + String(headers) + " | packets " + String(packets) +
+                 " | CRC errors " + String(crcErrors));
 }
 
 // ---------- inputs ----------
@@ -630,9 +696,21 @@ void checkInputs() {
     else if (cmd == "online") { forceOffline = false; Serial.println("MODE  online allowed"); }
     else if (cmd == "status") printStatus();
     else if (cmd == "txtest" || cmd == "txtest rfo") txTest(cmd == "txtest rfo");
+    else if (cmd == "rxtest") rxTest(10000);
+    else if (cmd.startsWith("power ")) {
+      int level = cmd.substring(6).toInt();
+      if (level < 2 || level > 17) {
+        Serial.println("POWER must be 2-17 dBm");
+      } else {
+        txPower = level;
+        if (radioOk) LoRa.setTxPower(txPower);
+        Serial.println("POWER TX power now " + String(txPower) + " dBm" +
+                       (txPower > 10 ? " (above the 10 mW / 10 dBm license-free limit in India)" : ""));
+      }
+    }
     else if (cmd == "regs") {
-      // modem settings; expected for SF7 / 125 kHz / CR 4/5 / CRC on:
-      // 0x1D=0x72, 0x1E=0x74, 0x26=0x04, sync word 0x39=0x5E
+      // modem settings; expected for SF9 / 125 kHz / CR 4/5 / CRC on:
+      // 0x1D=0x72, 0x1E=0x94 (SF9 + CRC), 0x26=0x04, sync word 0x39=0x5E
       const byte regs[] = { 0x01, 0x06, 0x07, 0x08, 0x09, 0x1D, 0x1E, 0x26, 0x39, 0x40, 0x42 };
       String out = "REGS ";
       for (byte r : regs) out += "0x" + String(r, HEX) + "=0x" + String(readRadioReg(r), HEX) + " ";
@@ -664,7 +742,7 @@ void setup() {
 
   SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, PIN_SS);
   tryRadio();
-  if (radioOk) Serial.println("[OK] LoRa 433 MHz, TX power " + String(TX_POWER) + " dBm (no antenna mode)");
+  if (radioOk) Serial.println("[OK] LoRa 433 MHz, TX power " + String(txPower) + " dBm");
   Serial.println("[OK] Sensors optional: SOS button D27, water D33 (nothing wired = no alert)");
 
   setupBle();
@@ -687,10 +765,12 @@ void loop() {
 
   int size = radioOk ? LoRa.parsePacket() : 0;
   if (size) {
-    String s;
-    while (LoRa.available()) s += (char)LoRa.read();
+    String raw;
+    while (LoRa.available()) raw += (char)LoRa.read();
+    String s = checkChecksum(raw);
     Packet p;
-    if (decode(s, p)) onPacket(p, LoRa.packetRssi());
+    if (s.length() == 0) Serial.println("BAD   checksum, ignored: " + raw);
+    else if (decode(s, p)) onPacket(p, LoRa.packetRssi());
     else Serial.println("BAD   ignored: " + s);
     blink();
   }

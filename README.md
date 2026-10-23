@@ -24,7 +24,7 @@ This repo holds the hackathon prototype. On a real boat, SeaMesh plugs into the 
 ```
 
 1. **Packet creation.** Each boat packs its ID, GPS position, fix time, status (position or SOS), a message number and a hop counter into a ~45-byte packet:
-   `type,origin,msgId,lat,lon,time,hop,trigger,via`, e.g. `S,3F2A,7,9.951234,75.948765,1761200000,0,BTN,3F2A`
+   `type,origin,msgId,lat,lon,time,hop,trigger,via*XX`, e.g. `S,3F2A,7,9.951234,75.948765,1761200000,0,BTN,3F2A*5C`. `*XX` is a CRC-8 of the text, checked after the packet is read out of the radio; it is not passed on to the phone.
 2. **Broadcast** over LoRa in all directions. No cellular network is involved.
 3. **Duplicate check.** A receiving boat drops packets it has already seen, so nothing bounces forever.
 4. **Relay or upload.** A boat whose phone has internet hands the packet to the phone, which uploads it. A boat without internet increments the hop counter and rebroadcasts it.
@@ -83,7 +83,7 @@ Service `6e5a0001-5ea3-4e5a-9c1d-2b7f0a4c8e10`
 
 ### Serial commands (115200 baud)
 
-`sos`, `cancel`, `pos`, `offline` (ignore the phone's internet and relay over LoRa instead), `online`, `status` (also shows radio state, uptime and free memory), `txtest` / `txtest rfo` (trace one LoRa transmission), `hangtest` (freeze the loop to check the watchdog restarts the board)
+`sos`, `cancel`, `pos`, `offline` (ignore the phone's internet and relay over LoRa instead), `online`, `status` (also shows radio state, uptime and free memory), `txtest` / `txtest rfo` (send one test packet), `rxtest` (listen 10 s and report signal strength, headers, packets and CRC errors), `power N` (TX power 2-17 dBm), `regs` (modem registers), `hangtest` (freeze the loop to check the watchdog restarts the board)
 
 ## Backend
 
@@ -122,6 +122,7 @@ This plays boat A sending positions, raising a water-sensor SOS after 20 s and g
 
 ## Prototype limitations
 
-- Transmit power is set to the 2 dBm minimum because the test boards have no antennas, so the range is a few metres. Fit 433 MHz antennas before raising it.
+- Radio: 433 MHz, SF9, 125 kHz, 10 dBm (the 10 mW license-free limit at 433 MHz in India). The test boards have no antennas, so the working range is about a metre; at SF7 or 2 dBm the boards did not hear each other at all. Fit 433 MHz antennas for any real range test.
+- Power the Ra-02 from its own ESP32's 3V3 and GND. Powering it from a separate supply caused SPI corruption (missing radio at boot, modem settings changing by themselves).
 - In India, 433 MHz is license-free only at low power (about 10 mW). A deployment would move to the 865–867 MHz band (up to 1 W) with SX1276-based modules and mast-mounted antennas.
 - The system only helps when another boat is within LoRa range; a lone boat far offshore still needs satellite.
